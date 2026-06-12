@@ -1,0 +1,34 @@
+# build.toml — 项目构建配置
+# 控制脚本编译、资源过滤、归档打包的行为
+# 文件格式：TOML
+# 创建日期：2026-06-13
+
+[compile]
+# 编译目标格式：asterbyte（字节码，推荐）或 ast（调试用 AST dump）
+target = "asterbyte"
+# 开启编译优化（常量折叠、死代码消除、跳转合并、窥孔优化）
+optimize = true
+# 压缩输出（去除空白和注释）
+minify = true
+
+[include]
+# 需要包含在构建产物中的文件（glob 模式，相对于项目根目录）
+patterns = [
+    "assets/**/*",
+    "gui/**/*",
+    "fonts/**/*",
+]
+
+[exclude]
+# 构建时排除的文件（glob 模式，优先级高于 include）
+patterns = [
+    "**/.aster_cache/**",
+    "**/*.tmp",
+    "**/*.bak",
+]
+
+[archive]
+# 归档格式：asterarchive（Asterism 资源归档，推荐）或 dir（目录）
+format = "asterarchive"
+# 是否加密资源文件（AES-256-GCM，正式发布时开启）
+encrypt = false

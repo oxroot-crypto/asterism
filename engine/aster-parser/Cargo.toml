@@ -1,0 +1,10 @@
+[package]
+name = "aster-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = ".aster DSL 解析器 — 将源码文本解析为 AST，基于 PEG 语法"
+
+[dependencies]
+# Phase 1 将添加 pest 等解析器依赖
+# Phase 1 将添加 aster-core（workspace 内部依赖）

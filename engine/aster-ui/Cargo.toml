@@ -1,0 +1,9 @@
+[package]
+name = "aster-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "UI 控件 — 游戏内 UI（对话框/菜单/文本历史/设置面板），不依赖 Web 技术"
+
+[dependencies]
+# Phase 3 将添加 aster-core、aster-renderer（workspace 内部依赖）

@@ -1,0 +1,21 @@
+# .asterignore — 构建排除规则
+# 匹配 Unix shell 风格 glob 模式
+# 这些文件和目录不会被 aster-pack build 包含
+
+# 编译产物
+.aster_cache/
+*.asterbyte
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 版本控制
+.git/
+.gitignore

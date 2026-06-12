@@ -1,0 +1,100 @@
+# Asterism — CI/CD Release
+#
+# 文件路径：.github/workflows/ci-release.yml
+# 功能概述：Tag push 自动发布 — 在版本 tag 推送时创建 GitHub Release，
+#           聚合所有平台的引擎二进制和 IDE 构建产物
+# 作者：Claude (AI)
+# 创建日期：2026-06-13
+
+name: CI — Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  # 第一步：构建所有平台产物
+  build:
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release
+        run: cargo build --workspace --exclude aster-ide --release
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ide/pnpm-lock.yaml
+
+      - name: pnpm install && pnpm build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+        working-directory: ./ide
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: aster-release-${{ matrix.os }}
+          path: |
+            target/release/aster-runtime*
+            ide/dist/
+          retention-days: 365
+
+  # 第二步：聚合产物并创建 GitHub Release
+  release:
+    name: "创建 GitHub Release"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "Asterism ${{ github.ref_name }}"
+          body: |
+            ## 🚀 Asterism ${{ github.ref_name }}
+
+            预发布版本，包含引擎运行时和 IDE 的构建产物。
+
+            ### 平台支持
+            - 🪟 Windows x86_64
+            - 🍎 macOS (Apple Silicon + Intel)
+            - 🐧 Linux x86_64
+
+            ### 安装说明
+            解压对应平台的归档文件，运行 `aster-runtime` 或 IDE 可执行文件。
+
+            ---
+            🤖 自动生成于 [CI — Release](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          draft: true
+          prerelease: true
+          files: artifacts/**/*

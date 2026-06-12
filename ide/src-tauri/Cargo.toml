@@ -1,0 +1,32 @@
+# Asterism IDE — Tauri v2 Rust 后端
+# 文件路径：ide/src-tauri/Cargo.toml
+# 功能概述：Tauri 后端 crate 清单 — 声明依赖、构建脚本、编译目标
+# 作者：Claude (AI)
+# 创建日期：2026-06-13
+
+[package]
+name = "aster-ide"
+version = "0.1.0"
+description = "Asterism IDE — 集成开发环境 Tauri 后端"
+edition = "2024"
+license = "MIT"
+
+[lib]
+# Tauri v2 要求三种 crate 类型以支持不同平台
+# - staticlib: Windows/MSVC, Linux
+# - cdylib: macOS 动态库
+# - rlib: 作为 Rust 库被测试引用
+name = "aster_ide_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+# Tauri 构建脚本 — 在编译期生成 HTML/CSS/JS 资源嵌入代码
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri v2 核心 — 窗口管理、事件系统、IPC 桥接
+tauri = { version = "2", features = [] }
+
+# 序列化 — 前后端 IPC 数据格式
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

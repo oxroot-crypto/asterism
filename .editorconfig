@@ -1,0 +1,39 @@
+# ============================================================
+# Asterism（群星）— EditorConfig
+# 跨编辑器统一缩进、换行、编码设置
+# ============================================================
+
+root = true
+
+# ── 通用设置 ──────────────────────────────────────────────
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# ── Rust ──────────────────────────────────────────────────
+[*.rs]
+indent_style = space
+indent_size = 4
+
+# ── TypeScript / Vue / JavaScript / JSON / YAML ───────────
+[*.{ts,vue,js,json,yaml,yml}]
+indent_style = space
+indent_size = 2
+
+# ── TOML ──────────────────────────────────────────────────
+[*.toml]
+indent_style = space
+indent_size = 4
+
+# ── Markdown ──────────────────────────────────────────────
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# ── .aster DSL ────────────────────────────────────────────
+[*.aster]
+indent_style = space
+indent_size = 2

@@ -1,0 +1,9 @@
+[package]
+name = "aster-vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "字节码虚拟机 — 执行编译后的场景脚本，管理执行状态"
+
+[dependencies]
+# Phase 1 将添加 aster-core、aster-compiler（workspace 内部依赖）

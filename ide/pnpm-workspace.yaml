@@ -1,0 +1,6 @@
+# Asterism IDE — pnpm workspace 配置
+# IDE 是独立的 pnpm 项目，非 monorepo
+# 此文件确保 pnpm 在 ide/ 目录下正确工作
+
+packages:
+  - "."

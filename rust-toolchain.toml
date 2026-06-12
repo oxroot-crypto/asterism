@@ -1,0 +1,10 @@
+# Asterism — Rust 工具链版本锁定
+# 确保所有开发者和 CI 使用相同的 Rust 版本
+# 文件路径：rust-toolchain.toml
+# 创建日期：2026-06-13
+
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy", "rust-analyzer"]
+targets = ["wasm32-unknown-unknown"]  # 预留 Web 构建
+profile = "default"

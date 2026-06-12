@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri-apps/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Asterism IDE",
+  "version": "0.1.0",
+  "identifier": "com.asterism.ide",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Asterism IDE",
+        "width": 1600,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

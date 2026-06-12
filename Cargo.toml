@@ -1,0 +1,56 @@
+# Asterism（群星）— 项目根 Workspace
+#
+# 统一管理 engine / packager / IDE 后端 三个 Rust 子项目的
+# 依赖版本、编译配置和测试门禁。
+# 从项目根目录直接运行 cargo 命令即可覆盖全部子项目。
+
+[workspace]
+members = [
+    # 引擎 core crates（11 个）
+    "engine/aster-asset",
+    "engine/aster-audio",
+    "engine/aster-compiler",
+    "engine/aster-core",
+    "engine/aster-parser",
+    "engine/aster-platform",
+    "engine/aster-renderer",
+    "engine/aster-runtime",
+    "engine/aster-save",
+    "engine/aster-ui",
+    "engine/aster-vm",
+
+    # 独立 CLI 工具
+    "packager",
+
+    # IDE Tauri 后端
+    "ide/src-tauri",
+]
+resolver = "2"
+
+# 统一包元数据 — 所有 crate 通过 workspace = true 继承
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Asterism Contributors"]
+
+# 统一依赖版本管理 — 所有 crate 通过 workspace = true 引用
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+
+# ============================================================
+# 编译配置文件
+# ============================================================
+
+# Debug 构建（本地开发）— 平衡编译速度与运行时调试体验
+[profile.dev]
+opt-level = 1        # 开启轻度优化，提速约 30% 编译
+debug = "full"       # 完整调试符号 — 支持断点和变量查看
+incremental = true   # 增量编译 — 仅重新编译变更部分
+
+# Release 构建（发布/CI）— 最小体积 + 最大速度
+[profile.release]
+opt-level = 3        # 最高优化级别
+lto = "thin"         # Thin LTO — 平衡链接时优化与编译内存
+codegen-units = 1    # 单 CGU — 利于内联和优化
+strip = "symbols"    # 剥离调试符号 — 减小二进制体积

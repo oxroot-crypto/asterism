@@ -1,0 +1,9 @@
+[package]
+name = "aster-save"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "存档系统 — 存档/读档/缩略图生成/CRC32 完整性校验"
+
+[dependencies]
+# Phase 5 将添加 aster-core、serde（workspace 内部依赖）

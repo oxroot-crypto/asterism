@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Asterism IDE 默认权限配置 — Phase 0 仅开放核心基础权限","local":true,"windows":["main"],"permissions":["core:default"]}}

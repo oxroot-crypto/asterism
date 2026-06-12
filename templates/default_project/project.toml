@@ -1,0 +1,29 @@
+# project.toml — 游戏项目元数据
+# Asterism 项目配置文件，IDE 和引擎在启动时读取
+# 文件格式：TOML
+# 创建日期：2026-06-13
+
+[project]
+# 项目名称（显示在窗口标题和关于对话框中）
+name = "My First Visual Novel"
+# 语义化版本号
+version = "0.1.0"
+# 入口场景 ID（对应 scripts/ 下的 .aster 文件名，不含扩展名）
+entry_scene = "prologue"
+
+[project.resolution]
+# 游戏设计分辨率（逻辑像素，引擎自动适配实际窗口大小）
+width = 1920
+height = 1080
+
+[project.settings]
+# 默认语言（ISO 639-1 代码，多语言支持 — v1.0.0）
+language = "zh-CN"
+# 默认文字显示速度（instant / slow / normal / fast）
+text_speed = "normal"
+# 默认 BGM 音量（0.0 ~ 1.0）
+default_bgm_volume = 0.8
+# 默认音效音量（0.0 ~ 1.0）
+default_se_volume = 1.0
+# 默认语音音量（0.0 ~ 1.0）
+default_voice_volume = 1.0

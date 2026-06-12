@@ -1,0 +1,40 @@
+-- prologue.aster — 示例场景脚本
+-- My First Visual Novel 的第一个场景
+-- 展示 .aster DSL 基本语法
+
+scene "prologue" {
+    description: "序章 — 相遇"
+
+    -- 设置场景背景和背景音乐
+    bg "bg_classroom_morning"
+    music "bgm_daily_life" fade_in: 2.0
+
+    -- 显示角色（角色定义在 characters/ 目录下）
+    show sayori at center with fade(0.5)
+
+    -- 角色对话（角色名后直接跟双引号字符串）
+    sayori "今天天气真好啊。"
+
+    -- 切换表情
+    show sayori emotion: "smile" with dissolve(0.3)
+    sayori "要不要一起去散步？"
+
+    -- 旁白（纯叙述，无角色名）
+    narration "那是樱花盛开的四月。我踏入了久违的故乡。"
+
+    -- 玩家选择支
+    menu "去哪里？" {
+        "樱花大道" {
+            $route_sakura = true
+            jump "chapter1/sakura_road"
+        }
+        "图书馆" {
+            $route_library = true
+            jump "chapter1/library"
+        }
+        "哪里都不去" if $affection_sayori >= 3 {
+            sayori "诶——好冷淡..."
+            jump "chapter1/stay"
+        }
+    }
+}

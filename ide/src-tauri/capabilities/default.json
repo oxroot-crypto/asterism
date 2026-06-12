@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri-apps/dev/crates/tauri-utils/schema.json",
+  "identifier": "default",
+  "description": "Asterism IDE 默认权限配置 — Phase 0 仅开放核心基础权限",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

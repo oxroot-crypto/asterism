@@ -1,0 +1,9 @@
+[package]
+name = "aster-compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = ".aster 编译器 — 将 AST 编译为字节码，供 VM 执行"
+
+[dependencies]
+# Phase 1 将添加 aster-core、aster-parser（workspace 内部依赖）

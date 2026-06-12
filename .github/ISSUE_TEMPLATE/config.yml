@@ -1,0 +1,20 @@
+# GitHub Issue 模板配置
+# 文件路径：.github/ISSUE_TEMPLATE/config.yml
+# 创建日期：2026-06-13
+
+# 允许不通过模板直接创建空白 Issue
+blank_issues_enabled: true
+
+# 外部跳转链接
+contact_links:
+  - name: "📖 Asterism 文档"
+    url: https://github.com/asterism/asterism/tree/main/docs
+    about: "查看项目文档（Requirements / Architecture / Roadmap）了解设计决策"
+
+  - name: "💬 讨论区"
+    url: https://github.com/asterism/asterism/discussions
+    about: "使用 GitHub Discussions 进行技术讨论和社区交流"
+
+  - name: "🌐 Asterism 官网"
+    url: https://asterism.dev
+    about: "访问项目官网获取最新动态、教程和演示视频"

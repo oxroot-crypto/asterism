@@ -1,0 +1,11 @@
+[package]
+name = "aster-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "核心数据类型 — 定义 Scene/Asset/Script/VariableStore 等基础数据结构"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+# aster-core 不依赖任何其他 engine crate（Architecture.md §4.2）
+# Phase 1 将逐步添加 thiserror、smallvec 等轻量依赖

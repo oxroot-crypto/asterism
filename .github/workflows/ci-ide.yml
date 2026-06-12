@@ -1,0 +1,157 @@
+# Asterism — CI/CD IDE
+#
+# 文件路径：.github/workflows/ci-ide.yml
+# 功能概述：IDE 完整 CI 流水线 — Vue 3 前端 lint/typecheck/test
+#           + Vite 构建 + Tauri 完整 IDE 编译验证
+# 作者：Claude (AI)
+# 创建日期：2026-06-13
+# 最后修改：2026-06-13
+
+name: CI — IDE
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# 取消同一 PR 上的旧运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-test:
+    name: "Lint + TypeCheck + Test"
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - uses: actions/checkout@v4
+
+      # 2. 安装 pnpm
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # 3. 安装 Node.js
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ide/pnpm-lock.yaml
+
+      # 4. 安装依赖
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+        working-directory: ./ide
+
+      # 5. ESLint 门禁
+      - name: pnpm lint
+        run: pnpm lint
+        working-directory: ./ide
+
+      # 6. TypeScript 类型检查
+      - name: pnpm typecheck
+        run: pnpm typecheck
+        working-directory: ./ide
+
+      # 7. Vitest 单元测试
+      - name: pnpm test
+        run: pnpm test
+        working-directory: ./ide
+
+      # 8. Vite 前端构建
+      - name: pnpm build
+        run: pnpm build
+        working-directory: ./ide
+
+  # ── 完整 IDE 编译（前端 + Tauri Rust 后端，3 平台） ──────
+  build-ide:
+    name: "IDE 构建 — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    needs: lint-typecheck-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 系统依赖（仅 Linux 需要）
+      - name: 安装 Tauri 系统依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      # 2. 安装 Rust 工具链
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+
+      # 3. Rust 编译缓存
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+
+      # 4. 安装 pnpm
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # 5. 安装 Node.js
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: ide/pnpm-lock.yaml
+
+      # 6. 安装前端依赖
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+        working-directory: ./ide
+
+      # 7. 构建 Vite 前端
+      - name: pnpm build
+        run: pnpm build
+        working-directory: ./ide
+
+      # 8. Tauri 完整构建（前端已就绪，按平台打包）
+      - name: pnpm tauri build
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   pnpm tauri build --bundles deb ;;
+            Windows) pnpm tauri build --bundles nsis ;;
+            macOS)   pnpm tauri build --bundles dmg ;;
+          esac
+        working-directory: ./ide
+        shell: bash
+        env:
+          CI: 'true'
+
+      # 9. 上传 IDE 构建产物
+      - name: 上传 IDE 产物
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: aster-ide-${{ matrix.os }}
+          path: |
+            target/release/aster-ide*
+            target/release/bundle/
+            ide/dist/
+          retention-days: 90

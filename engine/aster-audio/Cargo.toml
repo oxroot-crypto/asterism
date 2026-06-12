@@ -1,0 +1,9 @@
+[package]
+name = "aster-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "音频系统 — BGM/BGS/SE/Voice 播放、混音、淡入淡出"
+
+[dependencies]
+# Phase 4 将添加 rodio、aster-core、aster-asset（workspace 内部依赖）

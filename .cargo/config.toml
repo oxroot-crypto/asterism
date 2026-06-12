@@ -1,0 +1,19 @@
+# Asterism — Cargo 编译配置
+# 文件路径：.cargo/config.toml
+# 功能概述：配置编译优化选项，加速本地开发迭代
+# 作者：Claude (AI)
+# 创建日期：2026-06-13
+# 最后修改：2026-06-13
+
+[build]
+# sccache — 编译缓存加速器（可选，需手动安装）
+# 安装方式：cargo install sccache --locked
+# 启用方式（二选一）：
+#   1. 取消下面一行的注释 → rustc-wrapper = "sccache"
+#   2. 设置环境变量 → export RUSTC_WRAPPER=sccache
+# CI 中通过 Swatinem/rust-cache@v2 自动缓存，无需本地配置
+# rustc-wrapper = "sccache"
+
+# 增量编译 — 仅重新编译变更的代码单元
+# 缩短本地开发编译时间，CI 中由 rust-cache 接管
+incremental = true

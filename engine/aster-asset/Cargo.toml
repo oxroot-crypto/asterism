@@ -1,0 +1,10 @@
+[package]
+name = "aster-asset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "资源管理 — 资源加载/缓存/生命周期管理，支持异步预加载"
+
+[dependencies]
+# Phase 1 将添加 aster-core（workspace 内部依赖）
+# Phase 2 将添加 lru、image 等资源处理依赖

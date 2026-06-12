@@ -1,0 +1,72 @@
+# Asterism — CI/CD Rust
+#
+# 文件路径：.github/workflows/ci-rust.yml
+# 功能概述：Rust 引擎 + 打包工具 CI 流水线 — 3 平台矩阵，
+#           执行 cargo fmt → clippy → test → build 门禁
+#           覆盖 Engine（11 crates）和 Packager（aster-pack）
+#           注意：不包含 aster-ide（IDE 后端），因其需要前端 dist 先构建
+# 作者：Claude (AI)
+# 创建日期：2026-06-13
+# 最后修改：2026-06-13
+
+name: CI — Rust
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# 取消同一 PR 上的旧运行，节省 CI 时间
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-test-build:
+    name: "${{ matrix.os }} — Rust ${{ matrix.toolchain }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false # 一个平台失败不取消其他平台
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: ["1.95.0"]
+
+    steps:
+      # 1. 检出代码
+      - uses: actions/checkout@v4
+
+      # 2. 安装 Rust 工具链
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      # 3. Rust 编译缓存
+      - name: Rust 编译缓存
+        uses: Swatinem/rust-cache@v2
+
+      # 4. 格式检查（零 tolerance）
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      # 5. Clippy 门禁（零 warning）
+      - name: cargo clippy
+        run: cargo clippy --workspace --exclude aster-ide --all-targets -- -D warnings
+
+      # 6. 测试（Engine + Packager）
+      - name: cargo test
+        run: cargo test --workspace --exclude aster-ide
+
+      # 7. Release 构建
+      - name: cargo build --release
+        run: cargo build --workspace --exclude aster-ide --release
+
+      # 8. 上传引擎二进制产物
+      - name: 上传引擎产物 (${{ matrix.os }})
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: aster-engine-${{ matrix.os }}
+          path: target/release/aster-runtime*
+          retention-days: 90

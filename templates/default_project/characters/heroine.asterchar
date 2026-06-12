@@ -1,0 +1,20 @@
+# heroine.asterchar — 示例角色定义
+# 文件格式：TOML
+# 每个 .asterchar 文件定义一个角色及其立绘变体
+
+[character]
+id = "sayori"
+name = "小百合"
+display_color = "#F8BBD0"
+
+# 立绘变体 — 扁平 key-value 格式，key 为表情名，value 为资源路径
+[character.sprites]
+default = "sayori_default.png"
+smile = "sayori_smile.png"
+angry = "sayori_angry.png"
+embarrassed = "sayori_embarrassed.png"
+surprise = "sayori_surprise.png"
+
+# 语音配置（可选）
+[character.voice]
+prefix = "sayori"    # 语音文件前缀，如 sayori_0001.ogg
