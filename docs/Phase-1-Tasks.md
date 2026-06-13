@@ -1,0 +1,1532 @@
+# Phase 1 — 引擎基础：脚本解析与渲染管线 任务清单
+
+> **对应路线图**：[Roadmap.md](./Roadmap.md) 中 Phase 1 章节
+> **里程碑目标**：建立从 `.aster` 脚本源码到 GPU 像素的完整管线。引擎可以加载一个 `.aster` 脚本文件，在窗口中展示背景、角色立绘、对话文本（含打字机效果），并通过鼠标点击推进剧情。**不含音频和存档**。
+> **覆盖需求**：REQ-ENG-001~003, REQ-ENG-010~014, REQ-ENG-020~023, NFR-COMPAT-001~003
+> **预估总工时**：144 小时
+> **生成时间**：2026-06-13 10:00
+> **最后更新**：2026-06-13 10:00
+
+---
+
+## 📋 任务总览
+
+| 编号 | 任务名称 | 优先级 | 预估工时 | 依赖 | 状态 |
+|------|----------|--------|----------|------|------|
+| PH1-T01 | 实现 `aster-platform` — Platform trait + 3 平台实现 | P0 | 8h | 无 | [ ] |
+| PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [ ] |
+| PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [ ] |
+| PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 8h | 无 | [ ] |
+| PH1-T05 | 实现 `aster-parser` — AST 构建器与错误收集 | P0 | 8h | PH1-T02, PH1-T03, PH1-T04 | [ ] |
+| PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [ ] |
+| PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [ ] |
+| PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
+| PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [ ] |
+| PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [ ] |
+| PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [ ] |
+| PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
+| PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
+| PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
+| PH1-T15 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14 | [ ] |
+| PH1-T16 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T15 | [ ] |
+| PH1-T17 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
+| PH1-T18 | 主事件循环 — 帧循环 update→render→present | P0 | 8h | PH1-T15, PH1-T16, PH1-T17 | [ ] |
+
+**统计**：总计 18 个任务 | 已完成: 0 | 进行中: 0 | 待开始: 18
+
+---
+
+## 📐 依赖关系图
+
+```mermaid
+graph TD
+    PH1-T01[PH1-T01: aster-platform]
+    PH1-T02[PH1-T02: aster-core 数据模型]
+    PH1-T03[PH1-T03: aster-core 资源与变量]
+    PH1-T04[PH1-T04: aster-parser PEG 语法]
+    PH1-T05[PH1-T05: aster-parser AST 构建]
+    PH1-T06[PH1-T06: wgpu 设备+窗口]
+    PH1-T07[PH1-T07: 背景图层]
+    PH1-T08[PH1-T08: 角色立绘]
+    PH1-T09[PH1-T09: 文本渲染]
+    PH1-T10[PH1-T10: 打字机效果]
+    PH1-T11[PH1-T11: compiler 基础设施]
+    PH1-T12[PH1-T12: compiler 优化Pass]
+    PH1-T13[PH1-T13: VM 核心]
+    PH1-T14[PH1-T14: VM 变量/跳转]
+    PH1-T15[PH1-T15: SceneManager]
+    PH1-T16[PH1-T16: DialogueController]
+    PH1-T17[PH1-T17: InputManager]
+    PH1-T18[PH1-T18: 主事件循环]
+
+    PH1-T02 --> PH1-T03
+    PH1-T02 --> PH1-T05
+    PH1-T02 --> PH1-T07
+    PH1-T02 --> PH1-T08
+    PH1-T03 --> PH1-T05
+    PH1-T03 --> PH1-T14
+    PH1-T04 --> PH1-T05
+    PH1-T05 --> PH1-T11
+    PH1-T06 --> PH1-T07
+    PH1-T07 --> PH1-T08
+    PH1-T07 --> PH1-T09
+    PH1-T09 --> PH1-T10
+    PH1-T11 --> PH1-T12
+    PH1-T11 --> PH1-T13
+    PH1-T12 --> PH1-T13
+    PH1-T13 --> PH1-T14
+    PH1-T07 --> PH1-T15
+    PH1-T08 --> PH1-T15
+    PH1-T10 --> PH1-T16
+    PH1-T13 --> PH1-T15
+    PH1-T14 --> PH1-T15
+    PH1-T15 --> PH1-T16
+    PH1-T15 --> PH1-T18
+    PH1-T16 --> PH1-T18
+    PH1-T06 --> PH1-T17
+    PH1-T17 --> PH1-T18
+```
+
+---
+
+## 📝 详细任务列表
+
+### PH1-T01 — 实现 `aster-platform` — Platform trait + 3 平台实现
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | NFR-COMPAT-001（Windows 支持）, NFR-COMPAT-002（macOS 支持）, NFR-COMPAT-003（Linux 支持） |
+| **对应架构模块** | `aster-platform`（参考 Architecture.md §4.1） |
+| **前置依赖** | 无 |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：定义跨平台抽象 trait `Platform`，并为 Windows/macOS/Linux 三个桌面平台提供具体实现。该 trait 是所有引擎模块获取系统能力（路径、剪贴板、系统语言等）的唯一入口。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-platform/src/platform.rs` — `Platform` trait 定义 + `PlatformError` 错误类型 + `LanguageTag` 类型
+   - 新建：`engine/aster-platform/src/windows.rs` — `WindowsPlatform` 实现（`#[cfg(target_os = "windows")]`）
+   - 新建：`engine/aster-platform/src/macos.rs` — `MacOSPlatform` 实现（`#[cfg(target_os = "macos")]`）
+   - 新建：`engine/aster-platform/src/linux.rs` — `LinuxPlatform` 实现（`#[cfg(target_os = "linux")]`）
+   - 修改：`engine/aster-platform/src/lib.rs` — 模块声明 + 条件编译导出 + 工厂函数 `create_platform()`
+
+3. **实现要点**：
+   - `Platform` trait 必须派生 `Send + Sync`，所有方法返回 `Result` 或合理默认值
+   - 路径相关方法（`user_config_dir`、`default_save_dir`）使用 `std::env::consts::OS` + 平台标准目录规范：
+     - Windows: `%APPDATA%/Asterism/`、`%USERPROFILE%/Documents/My Games/{game_name}/saves/`
+     - macOS: `~/Library/Application Support/com.asterism.engine/`、`~/Library/Application Support/{game_name}/saves/`
+     - Linux: `~/.local/share/asterism/`、`~/.local/share/{game_name}/saves/`（遵循 XDG 规范）
+   - `normalize_path` 统一路径分隔符为 `/`，处理 Windows 的 `\\?\` 前缀
+   - `try_acquire_single_instance` 使用文件锁（`fs2` crate 或等效的 `std::fs::File` + 平台特定扩展）
+   - 条件编译：每个平台实现模块用 `#[cfg(target_os = "...")]` 门控，`lib.rs` 中通过条件编译选择具体实现
+   - 错误类型 `PlatformError` 实现 `std::error::Error` + `Debug + Display`（使用 `thiserror` 派生）
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §3.5）：
+     > NFR-COMPAT-001: Windows 10+ (x86_64)，通过 DirectX 12 或 Vulkan 运行
+     > NFR-COMPAT-002: macOS 13+ (x86_64 + ARM64/Apple Silicon)，通过 Metal 运行
+     > NFR-COMPAT-003: Linux 主流发行版（Ubuntu 22.04+ / Fedora 38+ / Arch），通过 Vulkan 运行，Wayland + X11 双支持
+   - 架构依据（Architecture.md §4.1）：`Platform` trait 完整接口签名见 Architecture.md 第 364-391 行
+   - 已有接口：本任务是第一个有实际代码的 crate，无已有接口需对接。`aster-platform` 仅依赖 `std`，不依赖其他 engine crate
+
+5. **🚫 本任务不做什么**：
+   - 不实现窗口创建、GPU 初始化（属于 `aster-renderer` 的 PH1-T06）
+   - 不实现音频设备抽象（属于 `aster-audio` Phase 2）
+   - 不实现 IPC/进程间通信（属于 Phase 3 IDE 预览桥接）
+   - 不添加任何平台特定的 GUI 依赖（如 Windows API、Cocoa、GTK）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `create_platform()` 在三个 CI 平台上均返回正确的具体类型，无编译错误 | CI 矩阵 `cargo test --package aster-platform` | 三个平台均编译通过，测试全部绿标 |
+| AC02 | `user_config_dir()` 返回的路径符合各平台标准目录规范 | 单元测试：调用方法，检查路径是否包含预期的目录名（如 Windows 含 `AppData/Roaming`，macOS 含 `Application Support`，Linux 含 `.local/share`） | 路径格式正确，目录存在（测试中自动创建） |
+| AC03 | `default_save_dir("test_game")` 在不同平台上返回正确的存档路径 | 单元测试：类似 AC02，验证路径包含游戏名和 saves 目录 | 路径包含 `test_game` 和 `saves` |
+| AC04 | `normalize_path()` 将 Windows 反斜杠路径转换为正斜杠 | 单元测试：`normalize_path(OsStr::new("a\\b\\c"))` → 输出路径分隔符为 `/` | 路径分隔符统一为 `/` |
+| AC05 | `system_language()` 返回非空 `LanguageTag` | 单元测试：调用方法，验证返回值可以解析为有效的 BCP 47 标签 | 返回值非空，格式如 `zh-CN` `en-US` `ja-JP` |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 三个桌面平台上编译验证 | 分别在 Windows、macOS、Linux 上执行 `cargo build --package aster-platform` | 三个平台均编译成功，无错误和 warning |
+| MV02 | 平台检测正确性 | 在 Windows 上编写临时 main.rs 调用 `create_platform()` 并打印 `user_config_dir()` 和 `system_language()` 结果 | 输出路径为 `C:\Users\<用户名>\AppData\Roaming\Asterism\`，语言为 `zh-CN`（中文系统） |
+
+---
+### PH1-T02 — 实现 `aster-core` 数据模型类型
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-003（变量与旗标系统的数据载体）, REQ-ENG-022（选择支数据结构） |
+| **对应架构模块** | `aster-core`（参考 Architecture.md §4.2） |
+| **前置依赖** | 无 |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：定义引擎所有模块共享的核心数据模型类型——`Project`（项目元数据）、`Character`（角色定义）、`Scene`（场景定义）、`SceneNode`（场景节点枚举）、`Choice`（选择支）。所有类型必须派生 `Debug + Clone + Serialize + Deserialize`。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-core/src/project.rs` — `Project` 结构体 + `ProjectSettings`（分辨率、默认音量等）
+   - 新建：`engine/aster-core/src/character.rs` — `Character` 结构体（id, name, display_color, sprites 表情映射, voice_prefix）
+   - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（Dialogue / ShowChar / HideChar / Narration / Menu / Branch / SetVariable / PlaySE / Wait / Effect / Call / Return / Label）+ `Choice` 结构体
+   - 修改：`engine/aster-core/src/lib.rs` — 添加 `mod project; mod character; mod scene;` + `pub use` 重导出所有公开类型
+   - 修改：`engine/aster-core/Cargo.toml` — 确认 `serde` workspace 依赖已启用 `derive` feature
+
+3. **实现要点**：
+   - 所有结构体/枚举必须派生 `Debug, Clone, Serialize, Deserialize`
+   - `SceneNode` 是核心枚举，每个 variant 携带该节点类型的专有数据（如 `Dialogue { speaker: String, text: String, voice_id: Option<...> }`）
+   - `Project` 结构体字段对应 `project.toml` 的 `[project]` section（见 Architecture.md §5.2）
+   - `Character.sprites` 使用 `HashMap<String, AssetId>`（key 为表情名如 "default"/"smile"，value 为资源 ID）
+   - `Scene.id` 格式为 `"chapter/scene_name"` 的路径字符串
+   - `Choice` 包含 `text: String`（显示文本）、`target: String`（跳转目标标签）、`condition: Option<String>`（可选的条件表达式字符串，Phase 1 阶段仅存储，VM 执行时解析）
+   - 遵循 CLAUDE.md 的 Rust 命名规范：Struct/PascalCase，字段/snake_case，为所有 pub 类型添加中文 docstring
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-003: 支持整型、浮点、字符串、布尔四种值类型的变量存储
+   - 需求依据（Requirements.md §2.1.3）：
+     > REQ-ENG-022: 在脚本指定位置显示一组选项（2-N 个），玩家点击其中一个选项后跳转到对应脚本标签
+   - 架构依据（Architecture.md §4.2 核心类型清单）：`Project` / `Character` / `Scene` / `SceneNode` / `Choice` 的字段定义
+   - 已有接口：无前置 crate 依赖，仅依赖 `serde`（workspace 级别已声明）
+   - `AssetId` 类型将在 PH1-T03 中定义，本任务的 `Character.sprites` 字段暂时使用 `String` 占位，PH1-T03 完成后修改为 `AssetId`
+
+5. **🚫 本任务不做什么**：
+   - 不定义 `AssetId`、`Asset`、`AssetType`（属于 PH1-T03）
+   - 不定义 `VariableStore`、`Value`、`FlagSet`（属于 PH1-T03）
+   - 不定义 `SaveData`、`Theme`（属于后续 Phase）
+   - 不实现任何序列化/反序列化的自定义逻辑（使用 serde 派生宏即可）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `Project` 结构体可正确序列化为 TOML 并反序列化回来 | 单元测试：构造一个完整的 `Project` 实例 → `toml::to_string` → `toml::from_str` → 断言字段相等 | 序列化/反序列化 round-trip 一致 |
+| AC02 | `SceneNode` 枚举的所有 variant 均可正确创建和模式匹配 | 单元测试：分别创建 `Dialogue`、`Menu`、`ShowChar` 等 variant，断言字段值正确 | 所有 variant 构造和访问正确 |
+| AC03 | `Character` 结构体的 `sprites` 映射可正确插入和查询表情 | 单元测试：`char.sprites.insert("smile".into(), "smile.png".into())`，然后 `char.sprites.get("smile")` 断言返回 Some | 表情映射操作正确 |
+| AC04 | `Scene` 结构体的 JSON 序列化 round-trip 正确 | 单元测试：`serde_json::to_string(&scene)` → `serde_json::from_str` → 断言 `scene.id` 和 `scene.nodes.len()` 一致 | JSON 序列化 round-trip 正确 |
+| AC05 | 所有公开类型均实现了 `Debug + Clone + Serialize + Deserialize` | 编译时检查：`cargo check` 无错误 | 编译通过，trait bound 满足 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 编译验证 | 在终端执行 `cargo build --package aster-core` | 编译成功，无错误和 warning |
+| MV02 | 文档查看 | 执行 `cargo doc --package aster-core --open`（或查看生成的文档） | 所有公开类型有完整的中文 docstring，文档页面可正常浏览 |
+
+---
+### PH1-T03 — 实现 `aster-core` 资源与变量类型
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 4 小时 |
+| **对应需求** | REQ-ENG-003（变量与旗标系统） |
+| **对应架构模块** | `aster-core`（参考 Architecture.md §4.2） |
+| **前置依赖** | PH1-T02（需要 `Character` 中引用 `AssetId`） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：定义资源标识与变量存储系统——`AssetId`（newtype 资源 ID）、`Asset`（资源元数据）、`AssetType`（资源类型枚举）、`VariableStore`（变量存储表）、`Value`（运行时值类型）、`FlagSet`（旗标集合）。完成后回填 PH1-T02 中 `Character.sprites` 的占位 `String` 类型为 `AssetId`。
+
+2. **涉及文件/组件**（共 3 个）：
+   - 新建：`engine/aster-core/src/asset.rs` — `AssetId(pub u64)` newtype + `Asset` 结构体 + `AssetType` 枚举
+   - 新建：`engine/aster-core/src/variable.rs` — `VariableStore` + `Value` 枚举 + `FlagSet`
+   - 修改：`engine/aster-core/src/lib.rs` — 添加 `mod asset; mod variable;` + `pub use` 重导出
+
+3. **实现要点**：
+   - `AssetId(pub u64)` 使用 newtype 模式，派生 `Copy + Eq + Hash + PartialEq + PartialOrd + Ord` 以便用作 HashMap key 和排序
+   - `AssetType` 枚举：`Background / CharacterSprite / Bgm / Se / Voice / Font / Video / GuiElement`，每个 variant 标注对应的 `assets/` 子目录名（方便后续资源扫描）
+   - `Asset` 结构体：`id: AssetId, asset_type: AssetType, path: PathBuf, metadata: HashMap<String, String>`
+   - `Value` 枚举：`Int(i64) / Float(f64) / String(String) / Bool(bool) / Array(Vec<Value>) / Map(HashMap<String, Value>)`，预留 P1 阶段（Phase 4）的 Array/Map 类型
+   - `VariableStore`：包装 `HashMap<String, Value>`，提供 `get(name) -> Option<&Value>` / `set(name, value)` / `delete(name)` 方法
+   - `FlagSet`：包装 `HashSet<String>`，提供 `set(flag)` / `unset(flag)` / `toggle(flag)` / `check(flag) -> bool` / `clear()` 方法
+   - 修改 PH1-T02 中 `Character.sprites` 的类型：`HashMap<String, String>` → `HashMap<String, AssetId>`（本任务完成后 PH1-T02 的 scene.rs 可能需引用 AssetId，但由 PH1-T02 先行定义基础结构，本任务只负责 AssetId 类型）
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-003: 支持整型、浮点、字符串、布尔四种值类型的变量存储。支持旗标（命名布尔值）的 set/unset/toggle/check 操作。变量在场景间保持有效；旗标操作结果正确
+   - 架构依据（Architecture.md §4.2 核心类型清单）：
+     > `VariableStore`: HashMap<String, Value>，Value 为 Int / Float / String / Bool / Array / Map
+     > `FlagSet`: HashSet<String>
+     > `AssetId`: newtype u64，按类型分段分配
+   - 已有接口：PH1-T02 中定义的 `Character` 结构体（`sprites` 字段待修改为 `AssetId` 类型）
+
+5. **🚫 本任务不做什么**：
+   - 不实现资源加载/缓存/生命周期管理（属于 `aster-asset` Phase 2）
+   - 不实现变量/旗标的 VM 操作码执行（属于 PH1-T14）
+   - 不实现 `SaveData` 序列化（属于 Phase 2 `aster-save`）
+   - 不修改 PH1-T02 中已完成的 `Scene`/`SceneNode` 等结构体
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `AssetId` newtype 可用作 HashMap key | 单元测试：`let mut m = HashMap::new(); m.insert(AssetId(1), "test"); assert_eq!(m.get(&AssetId(1)), Some(&"test"));` | HashMap 操作正确 |
+| AC02 | `Value` 枚举支持 6 种类型（Int/Float/String/Bool/Array/Map）的构造和模式匹配 | 单元测试：分别构造 6 种 variant，通过 `match` 提取值，断言内容正确 | 所有 variant 构造和提取正确 |
+| AC03 | `VariableStore` 的 get/set/delete 操作正确 | 单元测试：set("score", Int(100)) → get("score") 返回 Some(Int(100)) → delete("score") → get("score") 返回 None | CRUD 操作正确 |
+| AC04 | `FlagSet` 的 set/unset/toggle/check 语义正确 | 单元测试：set("flag_a") → check("flag_a") == true → toggle("flag_a") → check("flag_a") == false → unset("flag_b")（不存在）不 panic | 旗标操作语义正确 |
+| AC05 | `VariableStore` 和 `FlagSet` 支持 serde 序列化 round-trip | 单元测试：构造含多种 Value 的 VariableStore → serde_json::to_string → from_str → 断言值一致 | 序列化 round-trip 正确 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 编译验证 | 在终端执行 `cargo build --package aster-core` | 编译成功，无错误和 warning |
+| MV02 | 测试运行 | 在终端执行 `cargo test --package aster-core` | 所有测试通过 |
+
+---
+### PH1-T04 — 实现 `aster-parser` — PEG 语法定义与解析器框架
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-001（DSL 脚本解析） |
+| **对应架构模块** | `aster-parser`（参考 Architecture.md §4.3） |
+| **前置依赖** | 无（pest 语法文件独立于 Rust 类型；ParseError 仅依赖 `std`） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：定义 .aster DSL 的完整 PEG（Parsing Expression Grammar）语法文件，并搭建 pest 解析器框架——能够读取 `.aster` 源码文本，调用 pest 解析器生成 token 流，为 PH1-T05 的 AST 构建器提供输入。
+
+2. **涉及文件/组件**（共 4 个）：
+   - 新建：`engine/aster-parser/src/grammar.pest` — .aster DSL 的 PEG 语法定义（完整语法规则，覆盖 Phase 1 所有语法特性）
+   - 新建：`engine/aster-parser/src/parser.rs` — pest 解析器入口函数 `parse_script(source: &str) -> Result<PestTokens, Vec<ParseError>>`
+   - 新建：`engine/aster-parser/src/error.rs` — `ParseError` 结构体定义（location + message + hint + context）
+   - 修改：`engine/aster-parser/src/lib.rs` — 模块声明 + 公开导出 `parse_script` 和 `ParseError`
+   - 修改：`engine/aster-parser/Cargo.toml` — 添加 `pest = "2"` 和 `pest_derive = "2"` 依赖，添加 `[build-dependencies]` 中的 `pest` 用于编译期语法文件生成
+
+3. **实现要点**：
+   - **PEG 语法设计**（缩进敏感，2 空格缩进）：
+     - `WHITESPACE` 规则：空格 + 换行 + 注释（`--` 到行尾）
+     - `scene` 块：`scene "id" { ... }`，包含 `description:`、`bg`、`music`、`show`（带位置/转场参数）、对话行（`speaker "text"` 或 `speaker emotion:"xxx" "text"`）、`narration "text"`、`menu` 块、变量赋值 `$var = expr`、`jump "target"`、条件块
+     - `menu` 块：`menu "prompt" { choice_block* }`，每个 choice 为 `"option text" { commands }` 或带条件的 `"option text" if condition { commands }`
+     - 变量引用：`$variable_name`
+     - 字符串字面量：双引号 `"..."`，支持转义 `\"`
+     - 数字字面量：整数和浮点数
+     - 布尔字面量：`true` / `false`
+   - **ParseError 结构体**（Architecture.md §4.3）：
+     - `location: (usize, usize, usize)` — (line, column, offset)，均为 1-based（与 Monaco Editor 一致）
+     - `message: String` — 错误描述（中文，如 `第3行第12列：未闭合的字符串字面量`）
+     - `hint: Option<String>` — 修复建议（如 `是否漏掉了右引号 \" ？`）
+     - `context: String` — 出错行的源代码文本
+   - **pest 集成**：使用 `#[derive(Parser)]` 宏自动生成解析器，语法文件位于 `src/grammar.pest`
+   - **解析器入口**：`parse_script()` 调用 pest 解析，如果解析失败则将 pest 的错误转换为 `Vec<ParseError>`
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-001: 给定合法的 .aster 文件，解析器返回完整 AST 无错误；给定非法语法，解析器返回带行号/列的诊断信息；解析性能：10,000 行脚本 < 100ms
+   - 架构依据（Architecture.md §2.3）：
+     > 语法风格：声明式、缩进敏感、贴近自然语言。解析器：pest（PEG 解析器生成器）
+   - .aster DSL 语法示例（Architecture.md §2.3 第 163-191 行）：完整的 scene 块示例，展示 bg / music / show / dialogue / menu / jump 语法
+   - 已有接口：`AST` 类型由 PH1-T05 定义，本任务不依赖 PH1-T05
+
+5. **🚫 本任务不做什么**：
+   - 不构建 AST（pest token → AST 转换属于 PH1-T05）
+   - 不实现语义分析（类型检查、变量作用域等，属于 `aster-compiler`）
+   - 不实现 `.asterchar` / `project.toml` 解析（这些是 TOML 格式，不属于 .aster DSL）
+   - 不定义 AST 节点类型（属于 PH1-T05）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 合法 .aster 脚本被 pest 解析器成功解析（无语法错误） | 单元测试：用 `templates/default_project/scripts/prologue.aster` 作为输入，调用 `parse_script()`，验证返回 Ok | 解析成功，无错误 |
+| AC02 | 非法语法（如未闭合的字符串）返回含行号的错误 | 单元测试：输入 `scene "test" { sayori "hello }`（缺少闭合引号），断言返回 Err 且 ParseError 包含 line 字段 | 返回错误，行号正确 |
+| AC03 | 注释（`--` 前缀）被正确忽略 | 单元测试：输入含有单行注释和多行注释的脚本，断言解析结果与去除注释后的等效脚本一致 | 注释不影响解析结果 |
+| AC04 | 空文件解析不 panic | 单元测试：输入空字符串 `""`，断言返回 Ok 或明确的错误而非 panic | 不 panic，优雅返回 |
+| AC05 | 10,000 行脚本解析耗时 < 100ms | 性能测试：生成 10,000 行合法 .aster 脚本（重复对话行），测量 `parse_script()` 耗时 | 解析时间 < 100ms（NFR-PERF-011） |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 编译验证 | 在终端执行 `cargo build --package aster-parser` | 编译成功，pest 语法文件无编译期错误 |
+| MV02 | 有效脚本测试 | 创建临时 .aster 文件（包含 scene/bg/show/dialogue/menu/jump 完整语法），运行 `cargo test --package aster-parser` | 所有测试通过，包括该完整脚本的解析测试 |
+
+---
+### PH1-T05 — 实现 `aster-parser` — AST 构建器与错误收集
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-001（DSL 脚本解析 — 完整 AST 输出）, REQ-ENG-022（选择支 AST 节点） |
+| **对应架构模块** | `aster-parser`（参考 Architecture.md §4.3） |
+| **前置依赖** | PH1-T02（aster-core 数据模型类型）, PH1-T03（AssetId 类型）, PH1-T04（PEG 语法 + 解析器框架） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现 pest token 流 → AST 的构建器（AST Builder），将 PH1-T04 的解析器输出转换为结构化的 `ParsedScene` 抽象语法树。同时完善错误收集机制，确保每个语法/语义错误都携带精确的源码位置和中文错误消息。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-parser/src/ast.rs` — AST 节点类型定义：`ParsedScene`、`SceneNode`（解析器专用枚举，如 `Dialogue { speaker, text, emotion, voice_id }`、`ShowChar { char_id, position, emotion, transition }`、`Menu { prompt, choices }`、`SetVariable { name, value }`、`Jump { target }`、`Branch { condition, then_nodes, else_nodes }` 等）、`Choice`、`Position` 枚举
+   - 新建：`engine/aster-parser/src/builder.rs` — `AstBuilder` 结构体：遍历 pest Pair tree，逐规则构造 AST 节点，收集 `ParseError`
+   - 修改：`engine/aster-parser/src/parser.rs` — 集成 `AstBuilder`：`parse_script()` 的返回类型改为 `Result<ParsedScene, Vec<ParseError>>`
+   - 新建：`engine/aster-parser/src/error.rs` — （如 PH1-T04 已创建此文件则修改）完善 `ParseError` 的构造方法，添加 `new(location, message, hint, context)` 工厂函数
+   - 修改：`engine/aster-parser/src/lib.rs` — 模块声明 + 公开导出 `ParsedScene`、`SceneNode`、`AstBuilder`
+
+3. **实现要点**：
+   - **AST 节点类型**（`ast.rs`）：
+     - `ParsedScene`：包含 `id: String`、`description: Option<String>`、`nodes: Vec<SceneNode>`
+     - `SceneNode` 枚举（解析器专用，与 `aster-core::SceneNode` 类似但携带解析元数据）：
+       - `Bg { asset_path: String, transition: Option<TransitionSpec> }`
+       - `Music { asset_path: String, fade_in: Option<f32> }`
+       - `ShowChar { char_id: String, position: Position, emotion: Option<String>, transition: Option<TransitionSpec> }`
+       - `HideChar { char_id: String, transition: Option<TransitionSpec> }`
+       - `Dialogue { speaker: String, text: String, emotion: Option<String>, voice_id: Option<String> }`
+       - `Narration { text: String }`
+       - `Menu { prompt: String, choices: Vec<Choice> }`
+       - `SetVariable { name: String, value: Expr }`
+       - `SetFlag { name: String }`
+       - `UnsetFlag { name: String }`
+       - `Jump { target: String }`
+       - `Branch { condition: Expr, then_nodes: Vec<SceneNode>, elif_branches: Vec<(Expr, Vec<SceneNode>)>, else_nodes: Option<Vec<SceneNode>> }`
+       - `Label { name: String }`
+       - `Call { target: String }`
+       - `Return`
+     - `Expr` 枚举：`StringLiteral(String)` / `IntLiteral(i64)` / `FloatLiteral(f64)` / `BoolLiteral(bool)` / `Variable(String)` / `BinaryOp(Box<Expr>, Op, Box<Expr>)` / `UnaryOp(Op, Box<Expr>)`
+     - `Position` 枚举：`Left / Center / Right / Custom(f32, f32)`
+   - **AST Builder**（`builder.rs`）：递归下降式遍历 pest Pair 树，每个语法规则对应一个 `build_xxx()` 方法，返回 `Result<T, ParseError>`
+   - **错误恢复**：遇到非致命错误时（如单个对话行解析失败），AST Builder 应继续解析后续内容而非直接终止，以便一次解析收集所有错误
+   - **位置追踪**：每个 AST 节点可选地携带 `span: (usize, usize)` 源码位置信息（起始 offset, 结束 offset），方便后续编译器的错误定位
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-001: 给定合法的 .aster 文件，解析器返回完整 AST 无错误；给定非法语法，解析器返回带行号/列的诊断信息
+   - 架构依据（Architecture.md §4.3）：
+     > 解析流程：.aster 源码 → pest::Parser (PEG 语法) → PestToken 流 → AST Builder → ParsedScene
+   - 已有接口：PH1-T04 的 `parse_script()` 和 PEG 语法规则；PH1-T02 的 `aster-core` 类型（参考但不直接依赖——AST 类型为解析器专用）
+   - pest 文档参考：`pest::iterators::Pair` API 用于遍历解析树
+
+5. **🚫 本任务不做什么**：
+   - 不实现语义验证（变量未定义、跳转目标不存在等——属于 `aster-compiler` PH1-T11）
+   - 不将 AST 编译为字节码（属于 PH1-T11）
+   - 不实现 AST 优化/简化（属于 PH1-T12）
+   - 不依赖 `aster-core` 的类型（AST 类型为解析器自包含，编译器负责类型映射）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `prologue.aster` 解析为正确的 AST 结构 | 单元测试：解析 `templates/default_project/scripts/prologue.aster`，断言 `ParsedScene.id == "prologue"`，`nodes` 包含 `Bg`、`Music`、`ShowChar`、`Dialogue`、`Menu`、`Jump` 等节点 | AST 结构完整，节点类型正确 |
+| AC02 | 多次语法错误可在一次解析中全部收集 | 单元测试：输入含有 3 个独立语法错误的脚本（如第1行、第5行、第10行各一个错误），断言返回 `Err` 且包含 3 个 `ParseError` | 一次解析收集所有错误 |
+| AC03 | 空的 scene 块解析正确 | 单元测试：`scene "empty" { }` 解析成功，`nodes` 为空列表 | Ok，nodes = [] |
+| AC04 | 嵌套 `if/elif/else` 条件分支解析正确 | 单元测试：输入包含 `if/elif/else` 的 scene，断言 AST 中 `Branch` 节点的 `then_nodes`、`elif_branches`、`else_nodes` 结构正确 | 嵌套条件解析正确 |
+| AC05 | `ParseError` 携带精确的行号和列号 | 单元测试：输入故意在第 5 行第 12 列制造语法错误，断言 `ParseError.location` 为 `(5, 12, ...)` | 行号列号精确 |
+| AC06 | 各种 `Position` 变体解析正确 | 单元测试：分别测试 `show char at left`、`at center`、`at right`、`at (0.2, 0.8)` 的解析结果 | Position 枚举值正确 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 有效脚本完整解析 | 在终端执行 `cargo test --package aster-parser`，观察测试输出 | 所有测试通过，特别是包含完整 scene（bg+角色+对话+menu+jump）的解析测试 |
+| MV02 | 错误信息可读性 | 编写一个含有语法错误的 .aster 测试文件（如少写闭合引号），运行解析器，查看返回的错误信息 | 错误信息为中文，包含"第X行第Y列"、具体原因描述和修复建议 |
+
+---
+### PH1-T06 — wgpu 设备初始化 + 窗口创建
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-010（窗口与表面创建） |
+| **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `GpuContext` 组件） |
+| **前置依赖** | 无（wgpu/winit 为外部依赖，不依赖其他 engine crate） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：初始化 wgpu 设备和窗口 surface，创建渲染器的基础 GPU 上下文（`GpuContext`）。完成后能在三个平台上显示一个窗口，并通过 `clear_color` 清屏为指定颜色。
+
+2. **涉及文件/组件**（共 4 个）：
+   - 新建：`engine/aster-renderer/src/gpu_context.rs` — `GpuContext` 结构体：wgpu 设备/适配器/队列/表面初始化与生命周期管理
+   - 新建：`engine/aster-renderer/src/config.rs` — `RenderConfig` 结构体（分辨率、全屏、vsync、MSAA 采样数等）
+   - 修改：`engine/aster-renderer/src/lib.rs` — 模块声明 + 公开导出 `GpuContext` 和 `RenderConfig`
+   - 修改：`engine/aster-renderer/Cargo.toml` — 添加 `wgpu = "23"`、`winit = "0.30"` 依赖
+
+3. **实现要点**：
+   - **wgpu 初始化流程**（`GpuContext::new(config: &RenderConfig) -> Result<Self, RenderError>`）：
+     1. 创建 `winit::Window`（使用 `winit::window::WindowAttributes`，标题为 "Asterism"，大小与 `config.resolution` 一致）
+     2. 创建 `wgpu::Instance`（使用 `wgpu::InstanceDescriptor`，启用 Vulkan/DX12/Metal 后端）
+     3. 从 window 创建 `wgpu::Surface`
+     4. 请求 `wgpu::Adapter`（优先独立 GPU，`power_preference: HighPerformance`）
+     5. 从 adapter 请求 `wgpu::Device` 和 `wgpu::Queue`
+     6. 配置 `wgpu::SurfaceConfiguration`（与 window 内尺寸匹配，格式为 `Bgra8UnormSrgb`，present mode 为 `Fifo` 或 `Mailbox`）
+   - **resize 处理**：`GpuContext` 提供 `resize(new_width, new_height)` 方法，重新配置 surface 和 swap chain
+   - **帧呈现**：`GpuContext::present()` 方法封装 `surface_texture.present()`
+   - **清屏**：在渲染循环中获取当前帧的 `TextureView`，通过 `CommandEncoder::begin_render_pass` 以 `clear_color` 清屏（用于验证渲染管线通）
+   - `RenderConfig` 字段：`width: u32, height: u32`（默认 1920×1080），`fullscreen: bool`（默认 false），`vsync: bool`（默认 true），`msaa_samples: u32`（默认 1，v0.1 阶段暂不支持 MSAA）
+   - `RenderError` 使用 `thiserror` 派生，涵盖适配器不可用、表面创建失败等场景
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2）：
+     > REQ-ENG-010: 使用 winit + wgpu 在 Windows/macOS/Linux 上创建窗口，配置为给定分辨率（默认 1920×1080），支持窗口模式和全屏模式切换。三个平台均可创建窗口并渲染；窗口尺寸与配置分辨率一致
+   - 架构依据（Architecture.md §2.4）：wgpu 23.x，winit 0.30+，WGSL 着色器语言
+   - 架构依据（Architecture.md §4.6）：`GpuContext` 组件职责——wgpu 设备/适配器/队列/表面初始化与管理
+   - 已有接口：PH1-T01 的 `aster-platform` 提供平台路径，但本任务不依赖它（winit 自身处理跨平台窗口创建）
+
+5. **🚫 本任务不做什么**：
+   - 不实现任何图层渲染（背景/立绘/文本——属于 PH1-T07~T10）
+   - 不实现转场特效（属于 Phase 4）
+   - 不实现全屏切换 UI（属于后续 Phase，但 config 预留字段）
+   - 不依赖 `aster-core` 或 `aster-asset`（Phase 1 阶段渲染器直接使用文件路径加载资源）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `GpuContext::new()` 在 CI 三个平台上均创建成功 | CI 矩阵 `cargo test --package aster-renderer`（需 headless 适配或使用 lavapipe/llvmpipe 软件渲染） | 三个平台测试通过 |
+| AC02 | `RenderConfig` 默认值为 1920×1080, vsync=true, fullscreen=false | 单元测试：`RenderConfig::default()` 断言字段值 | 默认值与架构设计一致 |
+| AC03 | `GpuContext::resize(1280, 720)` 正确更新 surface 配置 | 单元测试（如有窗口）：调用 resize 后获取当前 surface 尺寸，断言为 1280×720 | surface 尺寸更新正确 |
+| AC04 | 清屏操作不产生 wgpu 验证错误 | 集成测试：创建 context → 清屏（红色）→ present → 验证无 wgpu error callback | 无 wgpu 验证层错误 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 窗口创建和清屏 | 运行渲染器测试程序（或临时 example），观察是否弹出窗口并显示纯色背景 | 弹出一个窗口，标题为 "Asterism"，显示配置的纯色（如红色），窗口尺寸为 1920×1080 |
+| MV02 | 窗口 resize | 手动拖拽窗口边缘改变大小，观察窗口内容是否随窗口缩放 | 窗口内容不拉伸变形（保持宽高比），无闪烁和崩溃 |
+
+---
+### PH1-T07 — 背景图层渲染
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-011（背景图片渲染） |
+| **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `SpriteBatcher`、`LayerManager` 组件） |
+| **前置依赖** | PH1-T02（aster-core AssetId 类型引用）, PH1-T06（GpuContext） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现背景图层的渲染——从 PNG/WebP 文件加载纹理，以全屏四边形（fullscreen quad）方式渲染到 Layer 0（背景层），自动缩放适配窗口分辨率（保持宽高比，裁剪或留黑边）。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-renderer/src/texture.rs` — `Texture` 封装：从文件路径加载 PNG/WebP → `wgpu::Texture` + `wgpu::Sampler` + `wgpu::BindGroup`
+   - 新建：`engine/aster-renderer/src/background_layer.rs` — `BackgroundLayer` 结构体：管理当前背景纹理、全屏四边形顶点缓冲、渲染管线
+   - 新建：`engine/aster-renderer/src/shaders/fullscreen_quad.wgsl` — WGSL 着色器：顶点着色器（全屏四边形）+ 片元着色器（纹理采样）
+   - 修改：`engine/aster-renderer/src/gpu_context.rs` — 为 `GpuContext` 添加 `device()` 和 `queue()` 访问器，方便各图层获取 GPU 资源
+   - 修改：`engine/aster-renderer/src/lib.rs` — 模块声明 + 公开导出
+
+3. **实现要点**：
+   - **纹理加载**（`texture.rs`）：
+     - 使用 `image` crate 解码 PNG/WebP → RGBA8 像素缓冲
+     - 创建 `wgpu::Texture`（`TextureDimension::D2`，`Rgba8UnormSrgb` 格式）
+     - 生成 mipmap（或使用简单的线性采样器，v0.1 阶段可跳过 mipmap）
+     - 创建 `wgpu::Sampler`（`FilterMode::Linear`，`AddressMode::ClampToEdge`）
+     - 创建 `wgpu::BindGroup`（绑定纹理+采样器到 shader 的 `@group(0) @binding(0)`）
+   - **全屏四边形着色器**（`fullscreen_quad.wgsl`）：
+     - 顶点着色器：3 个顶点组成覆盖整个裁剪空间的大三角形（`(-1,-1), (3,-1), (-1,3)`），无需顶点缓冲
+     - 片元着色器：采样纹理，输出 `@location(0) vec4<f32>`
+   - **背景层渲染**（`background_layer.rs`）：
+     - `set_background(&mut self, texture: Texture)` 设置当前背景
+     - `render(&self, encoder: &mut CommandEncoder, output_view: &TextureView)` 将背景绘制到指定纹理视图
+     - 渲染前通过 `RenderPass::set_bind_group` 绑定当前背景纹理
+   - **宽高比适配**：在 shader 中计算 UV 坐标，根据纹理宽高比与窗口宽高比的关系选择 "裁剪（cover）" 或 "留黑边（contain）" 模式。默认使用 cover（裁剪填充），通过 shader uniform 控制 fit 模式
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2）：
+     > REQ-ENG-011: 加载并显示背景图片（PNG/WebP 格式），自动缩放适配窗口分辨率（保持宽高比，裁剪或留黑边）。背景正确显示在画面最底层；切换背景时上一背景被正确替换；支持多种宽高比的素材
+   - 架构依据（Architecture.md §4.6）：
+     > 渲染管线：Layer-based compositing，Layer 0 = Background
+   - 已有接口：PH1-T06 的 `GpuContext`（提供 `device`、`queue`、surface 配置）
+
+5. **🚫 本任务不做什么**：
+   - 不实现背景切换过渡动画（转场特效属于 Phase 4）
+   - 不实现 Layer Manager（多图层合成暂不抽象，PH1-T08 实现立绘后如有需要再提取）
+   - 不实现资源缓存/生命周期管理（属于 `aster-asset` Phase 2）
+   - 不依赖 `aster-asset` crate
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | PNG 纹理可正确加载并创建 wgpu 资源 | 单元测试：加载测试 PNG 文件（如 1×1 红色像素），断言 `Texture` 创建成功，尺寸为 (1, 1) | 纹理加载成功，尺寸正确 |
+| AC02 | 全屏四边形着色器编译成功 | 编译期检验：WGSL shader 文件被 `include_str!()` 嵌入，`wgpu::ShaderModule` 创建成功 | 着色器编译无错误 |
+| AC03 | `BackgroundLayer::set_background()` 切换纹理后 render 不崩溃 | 集成测试：创建 GpuContext → BackgroundLayer → set 第一张纹理 → render → set 第二张纹理 → render（仅验证无 wgpu 错误） | 无 wgpu 验证层错误，无 panic |
+| AC04 | 加载不存在的图片文件返回错误而非 panic | 单元测试：`Texture::from_file("nonexistent.png")` 断言返回 `Err` | 返回 `Err(RenderError::...)`，不 panic |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 背景图片正确显示 | 运行渲染器测试程序，加载一张测试 PNG 背景图，观察窗口 | 窗口显示背景图片，图片覆盖整个窗口，不变形 |
+| MV02 | 背景切换 | 在测试程序中先显示背景 A，等待 2 秒后切换到背景 B | 背景从 A 变为 B，切换无闪烁 |
+| MV03 | 不同宽高比素材 | 分别加载 16:9、4:3、1:1 宽高比的背景图，观察显示效果 | 所有宽高比下图片正确缩放（裁剪或留黑边），无拉伸变形 |
+
+---
+### PH1-T08 — 角色立绘渲染
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 12 小时 |
+| **对应需求** | REQ-ENG-012（角色立绘渲染） |
+| **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `SpriteBatcher`、Layer 1/2） |
+| **前置依赖** | PH1-T02（Character 类型引用）, PH1-T07（背景图层 — 立绘层在背景之上） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现角色立绘精灵的渲染——加载带 Alpha 通道的 PNG/WebP 立绘图片，以 Sprite 形式渲染在背景图层（Layer 0）之上（Layer 1、Layer 2），支持多个立绘同时显示，每个立绘可独立设置位置（左/中/右/自定义坐标）和透明度。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-renderer/src/sprite_layer.rs` — `SpriteLayer` 结构体：管理 N 个活跃 Sprite，每个 Sprite 包含纹理 ID、屏幕位置（归一化坐标 0.0~1.0）、透明度（0.0~1.0）、z-index（用于层内排序）
+   - 新建：`engine/aster-renderer/src/shaders/sprite.wgsl` — Sprite 着色器：顶点着色器（接受 position + scale + uv 的四边形顶点）+ 片元着色器（alpha 混合采样纹理）
+   - 新建：`engine/aster-renderer/src/layer_manager.rs` — `LayerManager` 结构体：管理渲染层栈（Layer 0 = 背景，Layer 1-2 = 立绘，Layer 3 = 预留特效，Layer 4 = 文本，Layer 5 = UI），按序合成输出到最终帧缓冲
+   - 修改：`engine/aster-renderer/src/background_layer.rs` — 重构以接入 `LayerManager`（或将背景渲染逻辑统一到 Layer trait）
+   - 修改：`engine/aster-renderer/src/lib.rs` — 模块声明 + 公开导出
+
+3. **实现要点**：
+   - **Sprite 数据结构**：
+     ```rust
+     struct Sprite {
+         texture_id: AssetId,      // 纹理标识
+         position: (f32, f32),      // 归一化坐标 (0.0~1.0)，锚点为中心
+         scale: (f32, f32),         // 缩放因子 (1.0 = 原始尺寸)
+         alpha: f32,                // 透明度 (0.0=全透明, 1.0=不透明)
+         z_index: i32,              // 层内排序（数值越大越靠前）
+     }
+     ```
+   - **Sprite Layer 能力**：
+     - `add_sprite(sprite)` — 添加立绘
+     - `remove_sprite(texture_id)` — 移除立绘
+     - `update_position(texture_id, position)` — 更新位置
+     - `update_alpha(texture_id, alpha)` — 更新透明度（支持渐变的基础）
+     - `clear()` — 清除所有立绘（场景切换时调用）
+   - **Layer Manager**：管理 6 个渲染层的 `Vec<Box<dyn Layer>>`，每帧按 Layer 0→5 的顺序调用各层的 `render()` 方法，使用同一个 `CommandEncoder` 和 `OutputView`
+   - **Layer trait**（内部接口）：
+     ```rust
+     trait Layer {
+         fn render(&mut self, device: &Device, queue: &Queue, encoder: &mut CommandEncoder, output_view: &TextureView) -> Result<()>;
+     }
+     ```
+   - **着色器**：顶点着色器接收 position（归一化坐标，转换到 NDC）、scale、UV offset；片元着色器输出 `textureSample * alpha`（预乘 Alpha 混合）
+   - **位置枚举映射**：`Left = (0.25, 0.5)`、`Center = (0.5, 0.5)`、`Right = (0.75, 0.5)`、`Custom(x, y)` = 直接使用归一化坐标
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2）：
+     > REQ-ENG-012: 加载并显示角色立绘精灵（PNG/WebP，含透明度），支持多个立绘同时显示，每个立绘可独立设置位置（左/中/右/自定义坐标）和透明度。角色立绘正确显示在背景之上；多角色同时显示时层级正确
+   - 架构依据（Architecture.md §2.4 渲染管线架构图）：Layer 1/2 为 Character 层
+   - 已有接口：PH1-T07 的 `Texture` 加载工具和 `BackgroundLayer`；PH1-T06 的 `GpuContext`
+
+5. **🚫 本任务不做什么**：
+   - 不实现角色立绘的 show/hide 过渡动画（fade/slide 属于 Phase 4 REQ-ENG-051）
+   - 不实现角色图层 z-index 全局排序（当前仅支持层内排序，跨层固定为 Layer 1 < Layer 2）
+   - 不实现精灵批处理（Sprite Batching）优化（单立绘一帧一个 draw call 即可，批处理优化属于 Phase 4 性能优化）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 单个立绘正确渲染（带 Alpha 通道） | 集成测试：渲染一张带透明背景的 PNG 立绘，通过 `capture_screenshot` 获取像素数据，验证透明区域像素 alpha=0 | 透明区域正确显示背景色 |
+| AC02 | 多个立绘同时显示，z-index 排序正确 | 集成测试：添加 3 个不同 z-index 的立绘，验证高 z-index 的立绘覆盖低 z-index 的立绘 | z-index 排序正确 |
+| AC03 | 立绘位置枚举映射正确 | 单元测试：`Left` → `(0.25, 0.5)`，`Center` → `(0.5, 0.5)`，`Right` → `(0.75, 0.5)` | 位置坐标映射正确 |
+| AC04 | `update_alpha(0.5)` 后立绘半透明渲染 | 集成测试：设置 alpha=0.5，捕获像素，验证混合结果（立绘像素 + 背景像素各占约一半） | 透明度正确应用 |
+| AC05 | `clear()` 后所有立绘被移除 | 单元测试：添加 3 个 sprite → clear → 断言 sprite count = 0 | 立绘全部清除 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 多立绘同时显示 | 运行测试程序，在背景上加载 3 个角色立绘（左侧、中间、右侧各一个），观察显示效果 | 3 个立绘同时显示在背景之上，带透明度的区域正确显示背景，位置正确 |
+| MV02 | 透明度渐变 | 在测试程序中添加一个立绘，通过滑块或代码循环将 alpha 从 0.0 渐变到 1.0 | 立绘从透明逐渐变为不透明，过渡平滑 |
+| MV03 | 立绘替换 | 先显示角色 A 的立绘，1 秒后替换为角色 A 的另一个表情立绘 | 立绘正确替换，无闪烁，旧立绘消失、新立绘出现 |
+
+---
+### PH1-T09 — 文本渲染 — cosmic-text 集成
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 12 小时 |
+| **对应需求** | REQ-ENG-013（对话文本渲染） |
+| **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `TextRenderer` 组件，Layer 4） |
+| **前置依赖** | PH1-T07（Layer Manager 框架，文本层在 Layer 4） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：集成 cosmic-text 实现 GPU 加速的文本渲染。在画面指定区域（文本框）显示对话文本和说话者名字，确保 CJK + Latin + 常见符号完整覆盖、无乱码。支持基本颜色、字号、行距配置。
+
+2. **涉及文件/组件**（共 4 个）：
+   - 新建：`engine/aster-renderer/src/text_renderer.rs` — `TextRenderer` 结构体：cosmic-text `FontSystem` + `SwashCache` + `Buffer` 管理，提供 `set_text()`、`set_speaker()`、`render()` 方法
+   - 新建：`engine/aster-renderer/src/shaders/text.wgsl` — 文本着色器：MSDF（Multi-channel Signed Distance Field）或简单灰度字形采样 + 颜色混合
+   - 修改：`engine/aster-renderer/src/layer_manager.rs` — 将 TextRenderer 注册为 Layer 4（如有 PH1-T08 实现的 LayerManager）
+   - 修改：`engine/aster-renderer/src/lib.rs` — 模块声明 + 公开导出 `TextRenderer`
+
+3. **实现要点**：
+   - **cosmic-text 集成**：
+     - 创建全局 `FontSystem`（单例，所有 TextRenderer 实例共享，以节省字形缓存内存）
+     - 每个 `TextRenderer` 实例维护自己的 `Buffer`（文本布局缓冲）
+     - 使用 `SwashCache` 进行字形光栅化（CPU 端光栅化 → GPU 纹理上传）
+   - **文本框布局**：
+     - 文本区域锚定在屏幕底部，占据窗口宽度的 90%、高度的 25%（经典 ADV 文本框比例）
+     - 说话者名字显示在文本框左上角（独立小区域，字体略小或颜色不同以与正文区分）
+     - 正文左对齐、自动换行，行距默认 1.5 倍
+   - **字体回退链**：
+     - 内置开源字体：思源黑体（Source Han Sans，CJK）→ Noto Sans（Latin）→ 系统 Monospace（fallback）
+     - 字体文件存放于项目模板 `fonts/` 目录（PH1-T09 可在 renderer crate 内使用 `include_bytes!()` 嵌入一个最小的 CJK 字体作为默认）
+   - **文本着色器**：
+     - 使用 cosmic-text 生成的字形图集（glyph atlas texture）+ 每字符的 UV 坐标
+     - 片元着色器采样字形图集并乘以 uniform 中的文本颜色
+     - 支持描边效果（outline，用于增强可读性）——使用简单的膨胀采样
+   - **渲染流程**：
+     1. `set_text(speaker: &str, content: &str)` — 更新 Buffer 内容，触发重新布局
+     2. `render()` — 将 cosmic-text 生成的字形 mesh 提交到 wgpu 渲染通道（纹理 quad 列表）
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2）：
+     > REQ-ENG-013: 在画面指定区域渲染对话文本，含说话者名字。支持基本字符集（CJK + 拉丁 + 常见符号）。文字支持基本颜色和透明度设置。文本在文本框区域正确显示；CJK 字符无乱码；说话者名字与正文视觉区分
+   - 架构依据（Architecture.md §2.4）：cosmic-text（GPU 加速的文本布局和光栅化）
+   - 已有接口：PH1-T06 的 `GpuContext`（device, queue）；PH1-T08 的 `LayerManager`（Layer trait）
+   - cosmic-text API 要点：`FontSystem::new()` + `Buffer::new()` + `Buffer::set_text()` + `Buffer::shape_until_scroll()` + 遍历 `LayoutRun` 生成 glyph mesh
+
+5. **🚫 本任务不做什么**：
+   - 不实现打字机逐字显示效果（属于 PH1-T10）
+   - 不实现文字特效（shake/rainbow/ruby 等属于 Phase 4 REQ-ENG-052）
+   - 不实现文本框 UI 皮肤/九宫格渲染（属于 Phase 5 `aster-ui`）
+   - 不实现字体文件的热加载和主题配置（属于 Phase 5）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `TextRenderer` 可正确设置和布局 CJK 文本 | 单元测试：`set_text("小百合", "今天天气真好啊。")` 后验证 Buffer 有正确的 layout run 输出 | 文本布局成功，字形数量 > 0 |
+| AC02 | CJK + Latin 混合文本不乱码 | 单元测试：设置含中/日/英/数字/符号的混合文本，验证所有字符都有对应的 glyph | 所有字符可找到字形（glyph id > 0） |
+| AC03 | 空字符串不 panic | 单元测试：`set_text("", "")` 正常返回，`render()` 不 panic | 空文本优雅处理 |
+| AC04 | 极长文本（10000 字）自动换行不崩溃 | 单元测试：设置 10000 字符的文本，断言布局完成且无 panic | 长文本布局成功，耗时合理 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | CJK 文本显示 | 运行测试程序，在文本框中显示包含中文、日文假名、韩文、英文、数字的混合文本 | 所有字符正确显示，无乱码、无豆腐块（tofu） |
+| MV02 | 说话者名字区分 | 在测试程序中显示带有说话者名字（如"小百合"）和正文的对话 | 说话者名字与正文视觉区分（颜色/字号不同），位置在文本框左上角 |
+| MV03 | 自动换行 | 在文本框中输入一长串不包含换行的中文文本 | 文本在文本框边界自动换行，不超出文本框区域 |
+
+---
+### PH1-T10 — 打字机效果
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-014（文字逐字显示 / 打字机效果） |
+| **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6，属于 TextRenderer 的展示控制） |
+| **前置依赖** | PH1-T09（TextRenderer — 文本渲染基础能力） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：在 PH1-T09 文本渲染基础上实现打字机效果——对话正文以逐字方式显示，显示速度可配置。玩家点击/按键可跳过动画，立即显示全部剩余文本。
+
+2. **涉及文件/组件**（共 3 个）：
+   - 新建：`engine/aster-renderer/src/typewriter.rs` — `Typewriter` 状态机：管理当前显示字符数、速度配置、跳过逻辑
+   - 修改：`engine/aster-renderer/src/text_renderer.rs` — 添加 `set_visible_range(start: usize, end: usize)` 方法，支持渲染文本的子串（从第 0 个字符到第 N 个可见字符）
+   - 修改：`engine/aster-renderer/src/lib.rs` — 模块声明 + 公开导出 `Typewriter`
+
+3. **实现要点**：
+   - **Typewriter 状态机**：
+     ```rust
+     pub struct Typewriter {
+         speed: TypewriterSpeed,     // 显示速度
+         total_chars: usize,          // 当前文本总字符数
+         visible_chars: usize,        // 当前可见字符数
+         elapsed_since_last_char: Duration,  // 距上一个字符显示的时间
+         is_complete: bool,           // 是否已显示全部字符
+         is_skipped: bool,            // 是否被跳过
+     }
+     
+     pub enum TypewriterSpeed {
+         Instant,           // 瞬间完成
+         Slow,              // ~50ms/char
+         Normal,            // ~30ms/char
+         Fast,              // ~15ms/char
+         Custom(f32),       // 自定义 ms/char
+     }
+     ```
+   - **逐字推进**：每帧调用 `update(delta_time: Duration)`，根据 `speed` 和 `elapsed_since_last_char` 判断是否推进一个字符。推进时 `visible_chars += 1`
+   - **跳过逻辑**：调用 `skip()` 方法立即将 `visible_chars` 设为 `total_chars`，标记 `is_skipped = true`、`is_complete = true`
+   - **完成检测**：当 `visible_chars >= total_chars` 时，`is_complete = true`
+   - **文本重置**：`reset(new_text: &str)` 重置状态机，`total_chars` 更新为新文本长度，`visible_chars = 0`
+   - **渲染集成**：`TextRenderer` 调用 `typewriter.visible_chars()` 确定显示的字符范围，传递给 `set_visible_range()` 只渲染文本的前 N 个字符
+   - **声音同步预留**：每个字符推进时发出 `CharacterShown` 回调（用于 Phase 2 打字音效同步，Phase 1 仅预留接口但不播放声音）
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2）：
+     > REQ-ENG-014: 正文以逐字方式显示（类似打字机效果），速度可配置。玩家点击/按键可跳过动画直接显示全部文本。字符逐字出现，速度可调；点击后立即显示全部剩余文本
+   - 架构依据（Architecture.md §4.6）：`TextRenderer` 组件
+   - 已有接口：PH1-T09 的 `TextRenderer`（`set_text()` 和 `set_visible_range()` 方法）
+
+5. **🚫 本任务不做什么**：
+   - 不实现打字音效（属于 Phase 2 `aster-audio`）
+   - 不实现文字特效（shake/rainbow 等属于 Phase 4）
+   - 不实现文本历史回溯（Backlog 属于 Phase 4）
+   - 不实现 Auto 模式（自动推进属于 Phase 4 REQ-ENG-074）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `Typewriter::new(Normal)` 初始状态正确 | 单元测试：创建 Typewriter，断言 `is_complete == false`，`visible_chars == 0` | 初始状态正确 |
+| AC02 | 经过足够时间后文本全部显示 | 单元测试：创建 Typewriter (Normal, 30ms/char) → 设置 10 字符文本 → 模拟 300ms 的时间推进 → `assert!(is_complete)` | 文本全部显示 |
+| AC03 | `skip()` 后文本立即全部显示 | 单元测试：创建 Typewriter → 设置 100 字符文本 → 立即调用 `skip()` → `assert!(is_complete)` 且 `visible_chars == 100` | 跳过功能正确 |
+| AC04 | `reset()` 后状态正确重置 | 单元测试：显示完成 → `reset("new text")` → `is_complete == false`、`visible_chars == 0`、`total_chars == 8` | 重置后状态正确 |
+| AC05 | 不同速度档位差异正确 | 单元测试：Slow(50ms) 耗时 > Normal(30ms) 耗时 > Fast(15ms) 耗时（相同文本长度） | 速度配置生效 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 逐字显示效果 | 运行测试程序，显示一段对话文本（如 50 个中文字符），观察字符出现方式 | 字符逐字出现，速度均匀，类似打字机效果 |
+| MV02 | 点击跳过 | 在打字机动画进行中点击鼠标左键 | 剩余文本立即全部显示，动画中断 |
+| MV03 | 速度差异 | 分别测试 Slow / Normal / Fast 三档速度下相同文本的显示效果 | Slow 最慢、Fast 最快，速度差异明显可见 |
+
+---
+### PH1-T11 — 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler）
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 10 小时 |
+| **对应需求** | REQ-ENG-002（字节码编译与执行 — 编译部分） |
+| **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4） |
+| **前置依赖** | PH1-T05（AST 类型 — `ParsedScene`、`SceneNode`、`Expr` 等） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现 AST → 中间表示（IR）→ 字节码的编译管线。将 PH1-T05 解析器生成的 `ParsedScene` 转换为扁平的 IR 指令序列，再编码为定长字节码指令，供 VM（PH1-T13）执行。本任务实现编译器核心流程，优化 Pass 留给 PH1-T12。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-compiler/src/ir.rs` — IR 类型定义：`IrFunction`（场景编译单元）、`IrInstruction` 枚举（50+ 变体：`PushStr` / `PushInt` / `Bg` / `Show` / `Hide` / `Dialogue` / `Narrate` / `Menu` / `Jump` / `JumpIf` / `SetVar` / `SetFlag` / `Call` / `Return` / `Wait` / `End` 等）
+   - 新建：`engine/aster-compiler/src/bytecode.rs` — 字节码操作码定义（`Opcode` 枚举，1 byte）+ `CompiledScene` 结构体（操作码字节数组 + 常量池 + 标签表）+ 序列化/反序列化（使用 `bincode`）
+   - 新建：`engine/aster-compiler/src/compiler.rs` — `Compiler` 结构体：`compile(scene: &ParsedScene) -> Result<CompiledScene, Vec<CompileError>>` 方法，执行 AST→IR→Bytecode 三步编译
+   - 新建：`engine/aster-compiler/src/error.rs` — `CompileError` 结构体（携带源码位置、错误消息、修复建议）
+   - 修改：`engine/aster-compiler/src/lib.rs` — 模块声明 + 公开导出 `Compiler`、`CompiledScene`、`CompileError`
+
+3. **实现要点**：
+   - **编译流程**：`ParsedScene` → IR 生成 → 字节码编码
+   - **IR 指令**（Architecture.md §4.4 字节码指令集对应）：
+     - 数据指令：`PushStr(reg, str_idx)` / `PushInt(reg, i32)` / `PushFloat(reg, f32)` / `PushBool(reg, bool)`
+     - 渲染指令：`Bg(asset_idx)` / `ShowChar(char_idx, pos, emotion_idx)` / `HideChar(char_idx)` / `Dialogue(speaker_idx, text_idx)` / `Narrate(text_idx)` / `Menu(choices_ptr)`
+     - 控制流：`Jump(label_idx)` / `JumpIf(reg, label_idx)` / `JumpIfFlag(flag_idx, label_idx)` / `Call(label_idx)` / `Return`
+     - 变量/旗标：`SetVar(name_idx, value_reg)` / `SetFlag(flag_idx)` / `UnsetFlag(flag_idx)` / `ToggleFlag(flag_idx)`
+     - 其他：`Wait(duration_ms)` / `End`
+   - **常量池**：编译期间收集所有字符串字面量（说话者名、对话文本、资源路径、标签名等）到常量池 `Vec<String>`，IR 和字节码中通过索引引用
+   - **标签解析**：遍历 AST 收集所有 `Label` 节点，建立 标签名 → 指令偏移 的映射表
+   - **寄存器分配**（简化版）：使用 16 个寄存器（r0-r15），简单线性分配（临时结果用第一个空闲寄存器），PH1-T12 的窥孔优化会清理冗余分配
+   - **字节码格式**（Architecture.md §4.4）：
+     - 定长操作码 1 byte + 变长 operands（如 `reg: 1 byte`、`pool_idx: 2 bytes`、`label_idx: 2 bytes`）
+     - `CompiledScene` 结构：`{ version: u32, instructions: Vec<u8>, constant_pool: Vec<String>, label_table: HashMap<String, usize> }`
+     - 使用 `bincode` 序列化为 `.asterbyte` 文件
+   - **错误处理**：语义错误（跳转目标不存在、变量未声明等）收集为 `Vec<CompileError>`，非致命错误继续编译以收集更多错误
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-002: 引擎必须将 AST 编译为字节码，并由指令式虚拟机执行。VM 支持顺序执行、条件跳转、变量/旗标存取、子例程调用。相同脚本经编译→执行产生的结果一致
+   - 架构依据（Architecture.md §4.4）：IR→Bytecode 编译管线 + 4 个优化 Pass + 字节码指令集（Opcode 表 0x01~0xFF）
+   - 已有接口：PH1-T05 的 `ParsedScene`、`SceneNode`、`Expr` 类型（`aster-parser` crate）
+
+5. **🚫 本任务不做什么**：
+   - 不实现 4 个优化 Pass（Constant Folding / Dead Label / Jump Threading / Peephole — 属于 PH1-T12）
+   - 不实现 VM 执行器（属于 PH1-T13）
+   - 不实现 IR 的可视化/调试输出（Debug trace 可在后续添加，但不阻塞交付）
+   - 不处理 `.asterchar` 角色文件的编译（角色文件为 TOML 格式，运行时直接解析）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `prologue.aster` 编译为合法字节码 | 单元测试：解析 `prologue.aster` → 编译 → 断言 `CompiledScene.instructions` 非空，`constant_pool` 包含所有字符串字面量 | 字节码生成成功 |
+| AC02 | 跳转目标标签在 label_table 中有正确偏移 | 单元测试：编译含 `jump "some_label"` 和 `label "some_label"` 的脚本，断言 `label_table["some_label"]` 指向跳转后的第一条指令位置 | 标签表正确 |
+| AC03 | 编译含跳转到不存在标签的脚本返回错误 | 单元测试：`jump "nonexistent"` 但未定义对应 label，断言 `compile()` 返回 `Err` 且 `CompileError` 指明未定义的标签名 | 语义错误正确检测 |
+| AC04 | `CompiledScene` 可序列化为 bytes 并反序列化回来（round-trip） | 单元测试：`CompiledScene` → `bincode::serialize` → `bincode::deserialize` → 断言 `instructions` 和 `constant_pool` 一致 | 序列化 round-trip 正确 |
+| AC05 | 空场景编译为仅含 `End` 指令的字节码 | 单元测试：`scene "empty" { }` 编译 → 断言 instruction 序列以 `End` 操作码结尾 | 空场景正确处理 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 编译验证 | 在终端执行 `cargo build --package aster-compiler` | 编译成功，无错误 |
+| MV02 | 示例脚本编译 | 在测试或临时 main 中编译 `templates/default_project/scripts/prologue.aster`，打印常量池和指令数 | 常量池包含所有文字（对话/选项/标签等），指令数合理（非空，非异常大） |
+| MV03 | 错误脚本反馈 | 故意写一个有语义错误的脚本（如 jump 到不存在的标签），编译并观察错误输出 | 错误信息包含具体的标签名和所在行号，中文描述清晰 |
+
+---
+### PH1-T12 — 实现 `aster-compiler` — 优化 Pass（4 个）
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 6 小时 |
+| **对应需求** | REQ-ENG-002（字节码编译 — 优化后指令数 ≤ 优化前） |
+| **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4 — 优化 Pass 列表） |
+| **前置依赖** | PH1-T11（编译器基础设施 — IR 类型和字节码格式） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现 Architecture.md 定义的 4 个 IR 优化 Pass，减少编译产物的指令数量和冗余操作。优化后的字节码执行效率更高、体积更小。每个优化 Pass 独立实现，可单独开关。
+
+2. **涉及文件/组件**（共 2 个）：
+   - 新建：`engine/aster-compiler/src/optimizer.rs` — `Optimizer` 结构体，包含 4 个优化 Pass 的实现
+   - 修改：`engine/aster-compiler/src/lib.rs` — 添加 `mod optimizer;` + 公开导出 `Optimizer`
+
+3. **实现要点**：
+   - **Pass 1 — 常量折叠（Constant Folding）**：
+     - 扫描 IR 指令，检测编译期可求值的表达式：
+       - `PushInt(r0, 2)` + `PushInt(r1, 3)` + `Add(r2, r0, r1)` → `PushInt(r2, 5)`
+       - 字符串拼接：`PushStr(r0, "hel")` + `PushStr(r1, "lo")` + `Concat(r2, r0, r1)` → `PushStr(r2, "hello")`
+     - 实现方式：维护寄存器值的常量映射表，遇到算术/字符串指令时尝试直接求值
+   - **Pass 2 — 死标签消除（Dead Label Elimination）**：
+     - 从入口点（第一条指令）和所有 `Jump`/`JumpIf`/`Call` 的目标开始，标记所有可达的标签
+     - 移除所有未被任何跳转指令引用的 `Label` 及其后续指令（直到下一个 Label 或 End）
+   - **Pass 3 — 跳转合并（Jump Threading）**：
+     - 检测连续跳转链：`Jump L1` → ... → `Label L1` → `Jump L2` → 直接优化为 `Jump L2`
+     - 条件跳转到无条件跳转的优化：`JumpIf(r0, L1)` 且 `Label L1: Jump L2` → `JumpIf(r0, L2)`
+   - **Pass 4 — 窥孔优化（Peephole）**：
+     - 滑动窗口（2-3 条指令）扫描指令序列，应用模式匹配规则：
+       - `PushInt(r0, 0)` + `JumpIf(r0, L)` → `Jump L`（无条件跳转，简化）
+       - `SetVar("x", r0)` + 后续无读取 → 删除（死存储消除，需谨慎）
+       - `PushInt(r0, v)` + `PushInt(r0, v2)`（同一寄存器连续写入）→ 删除第一条 PushInt
+   - **优化器接口**：
+     ```rust
+     pub struct Optimizer { /* 配置：哪些 Pass 启用 */ }
+     impl Optimizer {
+         pub fn optimize(&self, ir: &mut Vec<IrInstruction>) -> OptimizeStats;
+     }
+     pub struct OptimizeStats {
+         pub instructions_before: usize,
+         pub instructions_after: usize,
+         pub folds: usize,        // 常量折叠次数
+         pub dead_labels: usize,  // 消除的死标签数
+         pub jumps_threaded: usize, // 合并的跳转数
+         pub peephole_applied: usize, // 窥孔优化应用次数
+     }
+     ```
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-002: 编译后字节码可被 VM 执行，优化后指令数 ≤ 优化前
+   - 架构依据（Architecture.md §4.4 优化 Pass）：
+     > 1. Constant Folding / 2. Dead Label Elimination / 3. Jump Threading / 4. Peephole
+   - 已有接口：PH1-T11 的 `IrInstruction` 枚举和 `Compiler` 结构体（优化在 IR→Bytecode 之间执行）
+
+5. **🚫 本任务不做什么**：
+   - 不实现高级优化（内联展开、循环优化、全局值编号等——v0.1 阶段不需要）
+   - 不修改 PH1-T11 的编译流程架构（优化作为独立阶段插入 compile 流程即可）
+   - 不实现优化 Pass 的并行执行（单个 Pass 间有顺序依赖，串行执行）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 常量折叠：`$x = 2 + 3` 编译为单个 `PushInt` 而非 3 条指令 | 单元测试：编译含 `$x = 2 + 3` 的脚本，开启优化，断言 IR 中无 `Add` 指令，仅含 `PushInt(reg, 5)` | 常量折叠正确 |
+| AC02 | 死标签消除：不可达的 `label` 被移除 | 单元测试：编译含 `jump "end"` → 一段死代码 → `label "end"` 的脚本，开启优化，断言死代码中的指令被移除 | 死标签消除正确 |
+| AC03 | 跳转合并：连续的 Jump→Label→Jump 被合并 | 单元测试：`Jump L1` → ... → `Label L1` → `Jump L2`，开启优化后断言 `Jump L1` 直接变为 `Jump L2` | 跳转合并正确 |
+| AC04 | 优化后指令数 ≤ 优化前（非退化保证） | 单元测试：对 `prologue.aster` 编译两次（开启/关闭优化），断言 `instructions_after <= instructions_before` | 指令数不增加 |
+| AC05 | 优化不改变程序语义（关键测试） | 单元测试：对同一脚本，优化前后的 IR 在相同 VM 执行下的 VmAction 序列完全一致 | 优化语义保留 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 优化统计输出 | 编译 `prologue.aster`（含优化），打印 `OptimizeStats`（优化前后指令数、各 Pass 应用次数） | 优化后指令数减少，stats 各项 > 0 或合理为 0（取决于脚本复杂度） |
+
+---
+### PH1-T13 — 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 10 小时 |
+| **对应需求** | REQ-ENG-002（字节码执行 — VM 核心）, REQ-ENG-022（选择支回调） |
+| **对应架构模块** | `aster-vm`（参考 Architecture.md §4.5） |
+| **前置依赖** | PH1-T11（`CompiledScene` 字节码格式）, PH1-T12（优化后的字节码） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现基于 token-threaded dispatch 的寄存器式虚拟机（VM），能够加载 `CompiledScene` 字节码并逐条执行指令。VM 通过 `VmAction` 枚举向上层（SceneManager）报告需要外部处理的"意图"（如等待输入、显示菜单），不直接操作渲染/音频。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-vm/src/vm.rs` — `Vm` 结构体：程序计数器（pc）、16 个通用寄存器、操作数栈、调用栈。核心方法 `step(&mut self, bytecode: &CompiledScene) -> VmAction`
+   - 新建：`engine/aster-vm/src/action.rs` — `VmAction` 枚举：`WaitForInput` / `ShowMenu { choices }` / `Sleep { duration }` / `SceneEnd` / `Command(EngineCommand)`
+   - 新建：`engine/aster-vm/src/opcode.rs` — `Opcode` 枚举定义（与 `aster-compiler::bytecode` 一致，1 byte）+ 解码辅助函数
+   - 新建：`engine/aster-vm/src/engine_command.rs` — `EngineCommand` 枚举：`SetBg { asset_id }` / `ShowChar { char_id, pos, emotion }` / `HideChar { char_id }` / `SetDialogue { speaker, text }` / `SetNarration { text }` / `PlayBgm { asset_id, fade_in }` / `PlaySe { asset_id }` / `PlayVoice { asset_id }` / `StopBgm { fade_out }` 等
+   - 修改：`engine/aster-vm/src/lib.rs` — 模块声明 + 公开导出 `Vm`、`VmAction`、`EngineCommand`
+
+3. **实现要点**：
+   - **VM 结构**（Architecture.md §4.5）：
+     ```rust
+     pub struct Vm {
+         pc: usize,                          // 程序计数器
+         registers: [Value; 16],             // 通用寄存器 r0-r15
+         stack: Vec<Value>,                  // 操作数栈（子例程参数传递）
+         variables: VariableStore,           // 全局变量（来自 aster-core）
+         flags: FlagSet,                     // 全局旗标（来自 aster-core）
+         call_stack: Vec<CallFrame>,         // 子例程调用帧
+     }
+     
+     pub struct CallFrame {
+         return_pc: usize,                   // 返回地址
+         saved_registers: [Value; 4],        // 保存 r0-r3（调用约定：这 4 个寄存器为调用者保存）
+     }
+     ```
+   - **Token-threaded dispatch**：`step()` 方法的核心是一个大 `match` 或 `loop + match`，根据当前 pc 指向的 opcode 字节分发到对应处理代码。Rust 中直接使用 `match` 枚举分发即可（编译器会生成跳转表，等效于 computed goto）
+   - **指令解码**：从 `bytecode.instructions[pc]` 读取 1 byte 操作码，后续字节按操作码规定的格式读取操作数（reg index: 1 byte, pool index: 2 bytes, label index: 2 bytes 等）
+   - **关键指令实现**：
+     - `PUSH_STR/PUSH_INT/PUSH_FLOAT/PUSH_BOOL` → 将常量池中的值加载到指定寄存器
+     - `BG` → 发出 `EngineCommand::SetBg`
+     - `SHOW/HIDE` → 发出 `EngineCommand::ShowChar/HideChar`
+     - `DIALOGUE/NARRATE` → 发出 `EngineCommand::SetDialogue/SetNarration` + 返回 `VmAction::WaitForInput`
+     - `MENU` → 返回 `VmAction::ShowMenu { choices }`
+     - `JUMP` → 无条件修改 `pc` 为目标标签的指令偏移
+     - `END` → 返回 `VmAction::SceneEnd`
+   - **指令指针推进**：每条指令执行完毕后 `pc += instruction_size(opcode)`（跳转指令直接设置 pc，不推进）
+   - **错误处理**：遇到无效操作码或栈溢出等异常情况，返回 `VmAction::Command(EngineCommand::Error { message })` 而非 panic
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-002: VM 支持顺序执行、条件跳转、变量/旗标存取、子例程调用。VM 执行时帧时间 < 0.5ms
+   - 架构依据（Architecture.md §4.5）：VM 架构——寄存器式、token-threaded dispatch。`VmAction` 回调模型
+   - 已有接口：PH1-T11 的 `CompiledScene`（`instructions`、`constant_pool`、`label_table`）；PH1-T03 的 `VariableStore`、`Value`、`FlagSet`
+   - `aster-vm` 依赖：`aster-core`（类型）+ `aster-compiler`（`CompiledScene` 类型）
+
+5. **🚫 本任务不做什么**：
+   - 不实现变量/旗标的 VM 操作码处理逻辑（`SET_VAR`/`SET_FLAG`/`JUMP_IF_FLAG` 等 — 属于 PH1-T14）
+   - 不实现 SceneManager（VM Action→Renderer 命令转换 — 属于 PH1-T15）
+   - 不实现调用栈的完整子例程语义（Call/Return 执行 — 属于 PH1-T14）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | VM 能加载 `CompiledScene` 并执行到 `END` 指令 | 单元测试：编译最简单的 `scene "t" { }` → VM 执行 → 断言最后返回 `VmAction::SceneEnd` | 场景完整执行 |
+| AC02 | `DIALOGUE` 指令发出正确的 `EngineCommand::SetDialogue` 并等待输入 | 单元测试：编译含一条对话的脚本 → VM step 到 DIALOGUE → 断言 command 包含正确的 speaker 和 text | 对话指令正确 |
+| AC03 | `JUMP` 指令正确修改 PC 到目标标签 | 单元测试：编译含 `jump "target"` + `label "target"` 的脚本 → 验证 PC 跳转到 label_table["target"] 位置 | 跳转正确 |
+| AC04 | 执行无效操作码（损坏的字节码）不 panic | 单元测试：构造含非法 opcode (0xFE) 的 `CompiledScene` → VM step → 断言返回 `Error` 而非 panic | 错误优雅处理 |
+| AC05 | VM 执行 1000 条指令耗时 < 0.5ms | 性能测试：编译含 1000 条连续 PUSH_INT 指令的脚本 → 测量执行时间 | 执行时间 < 0.5ms（NFR-PERF 隐含要求） |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 简单场景执行 | 编译一个包含 bg + show + dialogue + end 的脚本 → VM 执行 → 观察输出的 VmAction 序列 | VmAction 序列为：SetBg → ShowChar → SetDialogue + WaitForInput → SceneEnd |
+| MV02 | 菜单回调 | 编译含 `menu` 的脚本 → VM 执行到菜单 → 观察 VmAction::ShowMenu 中的 choices 内容 | choices 列表包含正确的选项文本和跳转目标 |
+
+---
+### PH1-T14 — 实现 `aster-vm` — 变量/旗标/跳转执行
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 6 小时 |
+| **对应需求** | REQ-ENG-003（变量与旗标系统 — VM 执行部分）, REQ-ENG-023（场景/脚本跳转） |
+| **对应架构模块** | `aster-vm`（参考 Architecture.md §4.5） |
+| **前置依赖** | PH1-T03（VariableStore/Value/FlagSet 类型）, PH1-T13（VM 核心 — 基础指令执行框架） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：在 PH1-T13 VM 核心基础上，实现变量/旗标/跳转相关操作码的完整执行逻辑：变量读写（`SET_VAR`、`GET_VAR`）、旗标操作（`SET_FLAG`、`UNSET_FLAG`、`TOGGLE_FLAG`）、条件跳转（`JUMP_IF`、`JUMP_IF_FLAG`）、子例程调用（`CALL`、`RETURN`）。完成后 VM 能正确执行条件分支 `if/elif/else`、场景间 `jump`、旗标门控的选择支等完整逻辑。
+
+2. **涉及文件/组件**（共 3 个）：
+   - 修改：`engine/aster-vm/src/vm.rs` — 在 `step()` 方法的 match 分发中添加变量/旗标/跳转/调用相关操作码的处理分支（约 12 个新操作码）
+   - 新建：`engine/aster-vm/src/call_frame.rs` — `CallFrame` 结构体及子例程调用/返回逻辑（如果 PH1-T13 未定义）
+   - 修改：`engine/aster-vm/src/engine_command.rs` — 补充变量相关命令（`SetVariable { name, value }`、`SetFlag { name }` 等 —— 实际上变量/旗标操作在 VM 内部完成，不产生外部 Command）
+
+3. **实现要点**：
+   - **变量操作码**：
+     - `SET_VAR(name_idx, value_reg)`：从常量池取变量名，从寄存器取值，写入 `self.variables.set(name, value)`
+     - `GET_VAR(reg, name_idx)`：从 `self.variables.get(name)` 读取变量值，写入目标寄存器。变量不存在时 → 运行时错误（返回 `EngineCommand::Error`）
+     - `DEL_VAR(name_idx)`：删除变量
+     - 变量名以 `$` 开头的 AST 约定：编译阶段已去掉 `$` 前缀，VM 直接使用无前缀的名称
+   - **旗标操作码**：
+     - `SET_FLAG(flag_idx)`：`self.flags.set(flag_name)`
+     - `UNSET_FLAG(flag_idx)`：`self.flags.unset(flag_name)`
+     - `TOGGLE_FLAG(flag_idx)`：`self.flags.toggle(flag_name)`
+     - `CHECK_FLAG(reg, flag_idx)`：将旗标状态写入寄存器（true→Bool(true), false→Bool(false)）
+   - **条件跳转**：
+     - `JUMP_IF(reg, label_idx)`：读取寄存器的布尔值，`true` 则跳转到标签，`false` 则继续下一条指令
+     - `JUMP_IF_FLAG(flag_idx, label_idx)`：检查旗标状态，`true` 则跳转
+     - `JUMP_IF_NOT(reg, label_idx)`：寄存器值为 `false` 时跳转（支持 if/else 语义）
+   - **子例程调用**：
+     - `CALL(label_idx)`：将当前 `pc + 1` 压入 `call_stack`，跳转到目标标签
+     - `RETURN`：从 `call_stack` 弹出返回地址，设置 `pc` 为返回地址
+     - 调用深度限制：`call_stack.len() >= 256` 时返回运行时错误（防止无限递归）
+   - **变量值比较**（编译期生成多条指令实现）：
+     - `CMP_EQ(reg_a, reg_b, result_reg)`：比较两个寄存器的值，result_reg 写入 Bool
+     - `CMP_GT/CMP_LT/CMP_GTE/CMP_LTE/CMP_NEQ`：其他比较操作
+     - 这些指令用于实现 `if $score >= 5` 等条件表达式
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1）：
+     > REQ-ENG-003: 变量在场景间保持有效；旗标操作结果正确；支持 if/elif/else 条件分支
+   - 需求依据（Requirements.md §2.1.3）：
+     > REQ-ENG-023: 支持 goto/jump 语义，从当前脚本位置跳转到指定场景的指定标签。跳转后从目标标签开始执行；跨文件跳转正确；跳转不导致变量丢失
+   - 架构依据（Architecture.md §4.5）：
+     > VM 架构：16 个寄存器、操作数栈、`variables: VariableStore`、`flags: FlagSet`、`call_stack: Vec<CallFrame>`
+   - 已有接口：PH1-T13 的 `Vm` 结构体（`registers`、`variables`、`flags`、`call_stack`）和 `step()` 方法；PH1-T03 的 `VariableStore`、`FlagSet` 的 API
+
+5. **🚫 本任务不做什么**：
+   - 不实现表达式求值（算术运算、字符串拼接等——AST 中的复杂表达式由编译器降级为多条简单指令，VM 只执行基本操作）
+   - 不实现 SceneManager 的场景切换逻辑（属于 PH1-T15）
+   - 不实现存档时的 VM 状态快照（属于 Phase 2 `aster-save`）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `$score = 10` → `if $score >= 5` 分支正确执行 | 单元测试：编译含变量赋值和条件分支的脚本 → VM 执行 → 断言执行了正确的分支 | 条件分支正确 |
+| AC02 | 旗标 set → check → toggle → check 序列正确 | 单元测试：执行 SET_FLAG → CHECK_FLAG(true) → TOGGLE_FLAG → CHECK_FLAG(false) | 旗标操作语义正确 |
+| AC03 | `jump "chapter2/start"` 跨场景跳转正确 | 单元测试：两个场景的字节码，第一个结尾 jump 到第二个的标签 → 验证 VM 在第二个场景中从正确位置开始执行 | 跨场景跳转正确，变量不丢失 |
+| AC04 | `call/return` 子例程正确返回 | 单元测试：编译含 `call "helper"` → `label "helper"` → `return` 的脚本 → 断言 return 后 PC 回到 call 的下一条指令 | 子例程调用正确 |
+| AC05 | 递归调用超过 256 层返回错误 | 单元测试：编译无限递归的 call 脚本 → VM 执行 → 断言返回 RuntimeError 而非栈溢出 panic | 递归深度限制生效 |
+| AC06 | 读取未定义的变量不 panic | 单元测试：`GET_VAR` 未定义变量 → 断言返回 `EngineCommand::Error` 携带变量名 | 错误优雅处理 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 条件分支完整测试 | 编译包含完整 `if/elif/else` 逻辑的 .aster 脚本（含变量比较、旗标检查、嵌套条件），VM 执行并观察分支走向 | 所有分支按预期执行，变量值影响分支结果 |
+| MV02 | 场景跳转与变量保持 | 场景 A 中设置 `$score = 100` → jump 到场景 B → 场景 B 中读取 `$score` | `$score` 在场景 B 中仍然为 100，跳转未丢失变量 |
+
+---
+### PH1-T15 — 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 12 小时 |
+| **对应需求** | REQ-ENG-020（鼠标点击推进）, REQ-ENG-021（键盘推进）, REQ-ENG-022（选择支交互）, REQ-ENG-023（场景跳转） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — SceneManager 状态机） |
+| **前置依赖** | PH1-T07（背景渲染）, PH1-T08（立绘渲染）, PH1-T13（VM 核心）, PH1-T14（VM 变量/跳转） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现场景状态机 `SceneManager`——管理场景的加载→执行→结束生命周期，将 VM 发出的 `VmAction` 转换为具体的渲染器命令（背景切换、立绘显示/隐藏、对话显示等），协调 VM 和 Renderer 的交互。这是引擎运行时的核心编排层。
+
+2. **涉及文件/组件**（共 5 个）：
+   - 新建：`engine/aster-runtime/src/scene_manager.rs` — `SceneManager` 结构体：场景加载、VM 执行循环、VM Action 分发
+   - 新建：`engine/aster-runtime/src/command_bridge.rs` — `CommandBridge` 结构体：`EngineCommand` → 渲染器方法调用的映射（`SetBg` → `renderer.set_background()`、`ShowChar` → `renderer.show_character()` 等）
+   - 新建：`engine/aster-runtime/src/error.rs` — `RuntimeError` 枚举（场景加载失败、VM 执行错误、渲染错误等）
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `SceneManager`、`RuntimeError`
+   - 修改：`engine/aster-runtime/Cargo.toml` — 添加依赖：`aster-core`、`aster-parser`、`aster-compiler`、`aster-vm`、`aster-renderer`、`aster-platform`
+
+3. **实现要点**：
+   - **SceneManager 状态机**（Architecture.md §4.11）：
+     ```rust
+     pub enum SceneState {
+         Idle,
+         Loading,            // 正在加载场景
+         Playing,            // 正在执行/等待输入
+         AtMenu,             // 显示选择支，等待选择
+         Paused,             // 暂停（Phase 1 仅预留，Phase 4 完整实现菜单）
+         Transitioning,      // 转场中（Phase 1 瞬间切换，Phase 4 动画）
+         Ended,              // 场景结束
+     }
+     ```
+   - **场景加载流程**：
+     1. `load_scene(scene_id: &str)` → 从文件系统读取 `.aster` 脚本（或 `.asterbyte` 预编译文件）
+     2. 如果是 `.aster` 源码 → 调用 `aster_parser::parse()` → `aster_compiler::compile()`
+     3. 如果是 `.asterbyte` 预编译文件 → 直接反序列化 `CompiledScene`
+     4. 初始化 VM 上下文（变量/旗标在场景间保持，不清除）
+   - **执行循环**（每帧调用 `update()`）：
+     1. 如果 `state == Playing`：调用 `vm.step()` 获取 `VmAction`
+     2. 根据 `VmAction` 分发：
+        - `WaitForInput` → 保持 Playing 状态，等待用户点击
+        - `ShowMenu { choices }` → 切换到 `AtMenu` 状态，向 Renderer 发送菜单命令
+        - `Sleep { duration }` → 启动计时器，保持 Playing
+        - `SceneEnd` → 切换到 `Ended` 状态
+        - `Command(cmd)` → 通过 `CommandBridge` 转发给 Renderer
+   - **CommandBridge**：
+     - 持有对 `Renderer` trait object 的引用
+     - `dispatch(cmd: EngineCommand)` 方法 → match 每个 command variant，调用对应的 renderer 方法
+     - Phase 1 不支持的命令（`PlayBgm`、`PlaySe`、`PlayVoice` 等）→ 记录 `warn!` 日志并忽略（不崩溃）
+   - **用户输入处理**：
+     - `on_click()` / `on_key_press()` → 如果当前在 `WaitForInput` → 继续执行 VM（调用 `vm.step()` 直到下一次 WaitForInput 或 SceneEnd）
+     - 如果在 `AtMenu` 状态 → 根据点击位置确定选中了哪个 choice → 将 choice index 传递给 VM → 继续执行
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.3）：
+     > REQ-ENG-020: 玩家点击鼠标左键推进对话到下一句
+     > REQ-ENG-021: 玩家按下 Enter/Space 推进对话
+     > REQ-ENG-022: 选择一组选项后跳转到对应脚本标签
+     > REQ-ENG-023: 跨文件跳转正确，跳转不导致变量丢失
+   - 架构依据（Architecture.md §4.11）：SceneManager 状态机图（Loading → TitleScreen → Playing → Paused → ...）
+   - 已有接口：
+     - `aster_parser::parse_script(source) -> Result<ParsedScene, Vec<ParseError>>`
+     - `aster_compiler::Compiler::compile(scene) -> Result<CompiledScene, Vec<CompileError>>`
+     - `aster_vm::Vm::step(bytecode) -> VmAction`
+     - `aster_renderer` 的 `Renderer` trait（或具体类型方法）
+     - `aster_platform::Platform`（文件系统路径）
+
+5. **🚫 本任务不做什么**：
+   - 不实现音频命令（BGM/SE/Voice — 桩函数记录 warn 日志，属于 Phase 2）
+   - 不实现存档/读档触发（属于 Phase 2）
+   - 不实现标题画面/设置/画廊等界面状态（属于 Phase 4/5）
+   - 不实现转场动画编排（Phase 1 为瞬间切换）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 场景从 `.aster` 加载并执行到结束 | 集成测试：加载 `prologue.aster` → SceneManager 执行 → 断言场景完整结束（state = Ended），中间无错误 | 场景完整执行 |
+| AC02 | `VmAction::WaitForInput` 后等待用户输入 | 单元测试：执行到第一个对话 → 断言 state = Playing 且等待输入 → 调用 `on_click()` → 断言 VM 继续执行 | 输入等待和推进正确 |
+| AC03 | `VmAction::ShowMenu` 正确触发菜单显示 | 单元测试：执行到 `menu` 节点 → 断言 state = AtMenu → 断言菜单包含正确数量的 choices | 菜单触发正确 |
+| AC04 | 选择支点击后跳转正确 | 单元测试：在 AtMenu 状态选择第 i 个选项 → 断言 VM PC 跳转到该选项对应的 target label | 选择支跳转正确 |
+| AC05 | 不支持的音频命令记录 warn 日志但不崩溃 | 单元测试：VM 发出 `PlayBgm` 命令 → CommandBridge 处理 → 断言无 panic，warn 日志存在 | 桩函数优雅降级 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 完整场景播放 | 运行引擎测试程序，加载 `prologue.aster`（含 bg + 1角色 + 5句对话 + 1选择支），通过鼠标点击推进剧情 | 场景从开始到结束完整播放：背景显示→立绘显示→对话逐句推进→菜单出现→选择后跳转→场景结束 |
+| MV02 | 选择支交互 | 在菜单出现时，点击不同的选项 | 每个选项执行不同的后续内容（跳转到不同标签），选择正确生效 |
+| MV03 | 键盘推进 | 在对话等待时按 Enter 键或 Space 键 | 键盘推进与鼠标点击效果一致，长按不重复触发 |
+
+---
+### PH1-T16 — 实现 DialogueController — 对话流管理 + 打字机状态控制
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 6 小时 |
+| **对应需求** | REQ-ENG-014（打字机效果 — 运行时控制）, REQ-ENG-020（点击推进对话） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — DialogueController） |
+| **前置依赖** | PH1-T10（Typewriter 效果）, PH1-T15（SceneManager — 对话命令来源） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现对话流管理器 `DialogueController`——协调每句对话的完整生命周期：从 SceneManager 收到对话命令 → 启动打字机动画 → 等待用户点击（打字机进行中则跳过动画，已完成则推进到下一句）→ 通知 SceneManager 继续 VM 执行。管理说话者名字显示、文本缓冲队列（预加载下一句文本）。
+
+2. **涉及文件/组件**（共 3 个）：
+   - 新建：`engine/aster-runtime/src/dialogue_controller.rs` — `DialogueController` 结构体：对话状态机、打字机实例管理、文本缓冲队列
+   - 修改：`engine/aster-runtime/src/scene_manager.rs` — 将对话处理逻辑从 SceneManager 中委托给 DialogueController（SceneManager 调用 `dialogue_controller.push()` 和 `dialogue_controller.update()`）
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出
+
+3. **实现要点**：
+   - **对话状态机**：
+     ```rust
+     pub enum DialogueState {
+         Idle,                   // 无活跃对话
+         Typewriting,            // 打字机动画进行中
+         WaitingForAdvance,      // 打字机完成，等待用户点击推进
+         Completed,              // 用户点击推进，等待 SceneManager 取走下一句
+     }
+     ```
+   - **对话条目**：
+     ```rust
+     pub struct DialogueLine {
+         pub speaker: String,        // 说话者名字
+         pub text: String,           // 对话正文
+         pub voice_id: Option<String>, // 语音文件（Phase 1 预留）
+     }
+     ```
+   - **核心方法**：
+     - `push(line: DialogueLine)` — 将新对话推入缓冲队列。如果当前无活跃对话，立即开始显示
+     - `update(delta: Duration) -> DialogueState` — 每帧调用，推进打字机动画（如有活跃类型机）
+     - `on_click() -> DialogueAction` — 处理用户点击：
+       - 打字机进行中 → 调用 `typewriter.skip()`，立即显示全部文本
+       - 打字机完成 → 标记 `Completed`，通知 SceneManager 推进 VM
+     - `current_text() -> &str` — 返回当前应显示的文本（考虑打字机进度）
+     - `current_speaker() -> &str` — 返回当前说话者
+   - **文本缓冲队列**：使用 `VecDeque<DialogueLine>`，支持预加载 1-2 句对话（减少文本布局延迟）。队列满时 push 阻塞等待
+   - **与 Renderer 集成**：每帧 `update()` 后，SceneManager 调用 `renderer.show_dialogue(controller.current_speaker(), controller.current_text())`
+   - **VO 预留**：`voice_id` 字段在 Phase 1 被忽略（不播放），Phase 2 音频系统集成后自动生效
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.2/§2.1.3）：
+     > REQ-ENG-014: 字符逐字出现，速度可调；点击后立即显示全部剩余文本
+     > REQ-ENG-020: 点击鼠标左键推进对话到下一句。在非选择支状态下，点击等价于"继续"
+   - 架构依据（Architecture.md §4.11）：DialogueController 在 SceneManager 状态机中的位置（Playing 状态的核心子状态机）
+   - 已有接口：PH1-T10 的 `Typewriter`（`update()`、`skip()`、`is_complete()`、`visible_chars()`）；PH1-T15 的 `SceneManager`
+
+5. **🚫 本任务不做什么**：
+   - 不实现对话历史（Backlog）记录（属于 Phase 4 REQ-ENG-075）
+   - 不实现 Skip/Auto 模式（属于 Phase 4 REQ-ENG-073/074）
+   - 不实现语音播放触发（属于 Phase 2，但预留 `voice_id` 字段）
+   - 不实现说话者名字铭牌 UI（属于 Phase 5 `aster-ui`）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | push 对话后自动开始打字机动画 | 单元测试：`push(line)` → `update(0)` → `state == Typewriting` | 自动开始 |
+| AC02 | 打字机进行中点击 = 跳过动画（非推进） | 单元测试：push → update 部分时间 → `on_click()` → `state == WaitingForAdvance`（文本全部显示） | 点击跳过而非推进 |
+| AC03 | 打字机完成后点击 = 推进到下一句 | 单元测试：push → 等待完成 → `on_click()` → `state == Completed` | 推进正确 |
+| AC04 | 对话队列正确串行 | 单元测试：push(A) → push(B) → 完成A推进 → 断言当前文本为 B 的内容 | 队列串行正确 |
+| AC05 | 空文本/空说话者不 panic | 单元测试：`push(DialogueLine { speaker: "", text: "" })` | 优雅处理，不 panic |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 打字机中点击跳过 | 在打字机动画进行中点击鼠标左键 | 剩余文本立即全部显示，进入等待推进状态 |
+| MV02 | 连续对话推进 | 完成第一句后点击 → 第二句开始打字机 → 再次点击跳过 → 第三句开始 | 多句对话连续推进流程顺畅，无卡顿或跳过对话 |
+| MV03 | 长按不重复触发 | 在对话等待时长按鼠标左键 | 只触发一次推进（点击一次只推进一句），不连续跳过多句 |
+
+---
+### PH1-T17 — 实现 InputManager — winit 事件→游戏动作映射
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 4 小时 |
+| **对应需求** | REQ-ENG-020（鼠标点击推进）, REQ-ENG-021（键盘推进） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — InputManager） |
+| **前置依赖** | PH1-T06（winit 窗口 — 事件源） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现输入管理器 `InputManager`——将 winit 原始窗口事件（鼠标点击、键盘按键、窗口关闭等）映射为语义化的游戏动作（`GameAction`）。提供去抖（debounce）逻辑，防止长按/快速连点导致意外重复触发。预留按键自定义框架（v0.5 实现实际绑定配置）。
+
+2. **涉及文件/组件**（共 2 个）：
+   - 新建：`engine/aster-runtime/src/input_manager.rs` — `InputManager` 结构体 + `GameAction` 枚举 + winit 事件处理
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出
+
+3. **实现要点**：
+   - **GameAction 枚举**：
+     ```rust
+     pub enum GameAction {
+         Advance,            // 推进对话/确认
+         OpenMenu,           // 打开菜单（Esc/右键 — Phase 1 预留，暂无菜单）
+         Skip,               // 快进（Ctrl 键 — Phase 4 实现完整 Skip）
+         Auto,               // 自动模式切换（Phase 4 实现）
+         QuickSave,          // 快速存档（F5 — Phase 2 实现）
+         QuickLoad,          // 快速读档（F9 — Phase 2 实现）
+         ToggleFullscreen,   // 切换全屏（Alt+Enter — Phase 1 预留）
+         Quit,               // 退出游戏
+         None,               // 无操作
+     }
+     ```
+   - **winit 事件映射**（Phase 1 默认绑定）：
+     | winit 事件 | GameAction | 说明 |
+     |-----------|-----------|------|
+     | `MouseButton::Left` pressed（释放时触发） | `Advance` | 鼠标左键推进 |
+     | `Key::Enter` / `Key::Space` pressed | `Advance` | 键盘推进 |
+     | `Key::Escape` pressed | `OpenMenu` | 预留 |
+     | `WindowEvent::CloseRequested` | `Quit` | 关闭窗口 |
+   - **去抖逻辑**：
+     - 鼠标/键盘按下记录时间戳，同一按键在 200ms 内的连续触发只产生一次 `GameAction`
+     - 使用 `Instant::elapsed()` 判断距离上次触发的时间
+     - 窗口关闭事件不去抖（立即处理）
+   - **输入管理器接口**：
+     ```rust
+     pub struct InputManager {
+         last_action_time: Instant,
+         debounce_interval: Duration,  // 默认 200ms
+     }
+     
+     impl InputManager {
+         pub fn process_event(&mut self, event: &WindowEvent) -> GameAction;
+     }
+     ```
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.3）：
+     > REQ-ENG-020: 玩家点击鼠标左键推进对话到下一句
+     > REQ-ENG-021: 玩家按下 Enter/Space 推进对话。长按不触发重复推进
+   - 架构依据（Architecture.md §4.11）：InputManager 在事件循环中的位置（winit events → InputManager → SceneManager）
+   - 已有接口：PH1-T06 的 winit `Window` 和事件循环
+
+5. **🚫 本任务不做什么**：
+   - 不实现按键自定义绑定（属于 Phase 5 REQ-ENG-078）
+   - 不实现 Skip 模式的实际逻辑（属于 Phase 4 REQ-ENG-073）
+   - 不实现快速存档/读档功能（属于 Phase 2）
+   - 不处理窗口 resize 事件（属于 PH1-T18 主事件循环）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 左键按下映射为 `Advance` | 单元测试：`process_event(&MouseInput { button: Left, state: Pressed })` → 断言返回 `Advance` | 鼠标映射正确 |
+| AC02 | Enter 键按下映射为 `Advance` | 单元测试：`process_event(&KeyboardInput { key: Enter, state: Pressed })` → 断言返回 `Advance` | 键盘映射正确 |
+| AC03 | 200ms 内连续两次相同按键只产生一次 `Advance` | 单元测试：连续两次 Enter 按键（间隔 50ms）→ 第一次返回 `Advance`，第二次返回 `None` | 去抖正确 |
+| AC04 | 不同按键不互相去抖 | 单元测试：Enter → 100ms → Space → 断言两次都返回 `Advance` | 不同按键独立去抖 |
+| AC05 | `WindowEvent::CloseRequested` 映射为 `Quit` | 单元测试：`process_event(&CloseRequested)` → 断言返回 `Quit` | 关闭事件映射正确 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 鼠标推进 | 在游戏窗口中点击鼠标左键 | 对话推进到下一句，不出现连续跳过两句的情况 |
+| MV02 | 键盘推进 | 在游戏窗口中按 Enter 键 | 与鼠标点击效果一致，对话推进一句 |
+| MV03 | 长按不重复 | 长按 Enter 键 2 秒 | 只推进一句对话，不连续跳过多句 |
+
+---
+### PH1-T18 — 主事件循环 — 帧循环 update→render→present
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | 全部 REQ-ENG-010~014, REQ-ENG-020~023（运行时集成） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — EventLoop） |
+| **前置依赖** | PH1-T15（SceneManager）, PH1-T16（DialogueController）, PH1-T17（InputManager） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现引擎的主事件循环——将 winit 事件循环、InputManager、SceneManager、DialogueController、Renderer 串联为一个完整的 60fps 帧循环。每帧执行 `process_input → update → render → present` 管线。处理窗口 resize、最小化/恢复、关闭等生命周期事件。
+
+2. **涉及文件/组件**（共 4 个）：
+   - 新建：`engine/aster-runtime/src/event_loop.rs` — `EventLoop` 结构体：winit 事件循环 + 帧循环逻辑 + 各子系统调度
+   - 新建：`engine/aster-runtime/src/app.rs` — `App` 结构体（顶层入口）：持有 `GpuContext`、`SceneManager`、`InputManager`、`DialogueController`，对外提供 `run()` 方法
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `App`（引擎主入口）
+   - 修改：`engine/aster-runtime/Cargo.toml` — 确认所有依赖已添加（`aster-core`, `aster-parser`, `aster-compiler`, `aster-vm`, `aster-renderer`, `aster-platform`, `winit`, `wgpu`）
+
+3. **实现要点**：
+   - **App 结构体（顶层入口）**：
+     ```rust
+     pub struct App {
+         gpu_context: GpuContext,
+         scene_manager: SceneManager,
+         dialogue_controller: DialogueController,
+         input_manager: InputManager,
+         is_running: bool,
+         target_fps: u32,  // 默认 60
+     }
+     
+     impl App {
+         pub fn new(config: AppConfig) -> Result<Self, RuntimeError>;
+         pub fn run(&mut self);
+     }
+     ```
+   - **帧循环**（在 `winit::EventLoop::run()` 中）：
+     ```rust
+     // 每帧执行：
+     // 1. 处理所有待处理事件（winit events → InputManager）
+     // 2. 计算 delta_time
+     // 3. SceneManager.update(delta_time)
+     //    - VM step（如果需要）
+     //    - Command dispatch（VM Action → Renderer）
+     // 4. DialogueController.update(delta_time)
+     // 5. Renderer.render_frame(scene_state, dialogue_state)
+     // 6. GpuContext.present()
+     ```
+   - **帧率控制**：
+     - 使用 `winit::EventLoop::run()` 的原生事件驱动模型（不自行实现忙循环）
+     - 通过 `Window::request_redraw()` 驱动渲染循环
+     - 测量帧时间并上报（Phase 1 仅日志输出，Phase 3 IDE 预览可读取）
+   - **窗口生命周期**：
+     - `Resized` → 调用 `gpu_context.resize(new_width, new_height)`
+     - `Minimized` → 暂停渲染循环（跳过 `render_frame`），减少 GPU 负载
+     - `Focused/Unfocused` → Phase 1 不做特殊处理，后续 Phase 可在此暂停/恢复音频
+     - `CloseRequested` → 设置 `is_running = false`，退出事件循环
+   - **错误处理**：
+     - `SceneManager` 的运行时错误 → 记录错误日志，尝试优雅退出（不做静默崩溃）
+     - `Renderer` 的表面丢失（`SurfaceError::Lost`） → 重新配置 surface
+     - `Renderer` 的超时（`SurfaceError::Timeout`） → 重试获取表面纹理
+
+4. **关联上下文**：
+   - 需求依据（综合）：
+     > 引擎帧率 1080p ≥ 60 fps（NFR-PERF-001）
+     > 窗口 resize 正确重分配 swapchain（Phase 1 产出物检查）
+   - 架构依据（Architecture.md §4.11）：事件循环和状态机
+   - 已有接口：
+     - PH1-T06 的 `GpuContext`（`render_frame()`、`present()`、`resize()`）
+     - PH1-T15 的 `SceneManager`（`load_scene()`、`update()`、`on_click()`）
+     - PH1-T16 的 `DialogueController`（`push()`、`update()`、`on_click()`）
+     - PH1-T17 的 `InputManager`（`process_event()`）
+
+5. **🚫 本任务不做什么**：
+   - 不实现标题画面（Title Screen）（属于 Phase 5）
+   - 不实现暂停菜单（Pause Menu）（属于 Phase 4）
+   - 不实现帧率限制器的复杂策略（Phase 1 使用简单 vsync + request_redraw）
+   - 不实现多线程渲染（Phase 1 单线程，Phase 4 可考虑 Asset 加载异步化）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `App::new()` 正确初始化所有子系统 | 单元测试：创建 App 实例 → 断言所有子系统非空（GpuContext、SceneManager、InputManager、DialogueController） | 初始化成功 |
+| AC02 | 窗口 resize 事件触发 GpuContext resize | 集成测试（模拟）：发送 Resized(1280, 720) 事件 → 断言 `gpu_context.surface_size() == (1280, 720)` | resize 正确传播 |
+| AC03 | 窗口最小化后暂停渲染 | 单元测试：`is_minimized() == true` → 断言帧循环跳过 `render_frame()` | 最小化优化生效 |
+| AC04 | `CloseRequested` 事件正确退出循环 | 集成测试：发送 CloseRequested 事件 → 断言 `is_running == false` | 退出正确 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 完整游戏流程 | 运行引擎，加载 `prologue.aster`，通过鼠标点击从头到尾推进整个场景 | 场景完整播放：背景→立绘→对话逐句→打字机效果→菜单选择→跳转→结束，流程无卡顿或崩溃 |
+| MV02 | 窗口 resize | 拖拽窗口边缘改变大小，观察渲染内容 | 背景/立绘/文本随窗口缩放正确适配，无变形、无闪烁、无黑屏 |
+| MV03 | 最小化和恢复 | 最小化窗口，等待几秒后恢复 | 恢复后渲染正常继续，无崩溃，画面内容正确 |
+| MV04 | 帧率验证 | 运行引擎（1080p），通过帧时间日志或 FPS 计数器观察帧率 | 稳定 60fps，无明显掉帧（≤58fps 可接受偶尔的微波动） |
+
+---
+
+---
+
+## 🔗 与其他 Phase 的关联
+
+| 关联方向 | Phase | 说明 |
+|----------|-------|------|
+| 依赖前置 | Phase 0 | 依赖 Phase 0 创建的 Cargo workspace 骨架、CI/CD 管线、CLAUDE.md 规范 |
+| 被依赖 | Phase 2 | Phase 2 依赖本 Phase 的全部 crate（`aster-platform`、`aster-core`、`aster-parser`、`aster-compiler`、`aster-vm`、`aster-renderer`、`aster-runtime`），在此基础上添加音频、资源缓存、存档功能 |
+| 被依赖 | Phase 3 | Phase 3 IDE 后端以库形式依赖 `aster-parser`、`aster-compiler`、`aster-core` |
+
+---
+
+## 📊 完成度追踪
+
+- **总任务数**：18
+- **已完成**：0（0%）
+- **进行中**：0（0%）
+- **待开始**：18（100%）
+- **已废弃**：0（0%）
+
+> 最后更新：2026-06-13 10:00 — 由 /project-tasks 命令自动维护
