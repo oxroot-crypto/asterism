@@ -13,7 +13,7 @@
 
 | 编号 | 任务名称 | 优先级 | 预估工时 | 依赖 | 状态 |
 |------|----------|--------|----------|------|------|
-| PH1-T01 | 实现 `aster-platform` — Platform trait + 3 平台实现 | P0 | 8h | 无 | [ ] |
+| PH1-T01 | 实现 `aster-platform` — Platform trait + 3 平台实现 | P0 | 8h | 无 | [x] |
 | PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [ ] |
 | PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [ ] |
 | PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 8h | 无 | [ ] |
@@ -32,7 +32,7 @@
 | PH1-T17 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T18 | 主事件循环 — 帧循环 update→render→present | P0 | 8h | PH1-T15, PH1-T16, PH1-T17 | [ ] |
 
-**统计**：总计 18 个任务 | 已完成: 0 | 进行中: 0 | 待开始: 18
+**统计**：总计 18 个任务 | 已完成: 1 | 进行中: 0 | 待开始: 17
 
 ---
 
@@ -100,7 +100,7 @@ graph TD
 | **对应需求** | NFR-COMPAT-001（Windows 支持）, NFR-COMPAT-002（macOS 支持）, NFR-COMPAT-003（Linux 支持） |
 | **对应架构模块** | `aster-platform`（参考 Architecture.md §4.1） |
 | **前置依赖** | 无 |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -156,6 +156,21 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 三个桌面平台上编译验证 | 分别在 Windows、macOS、Linux 上执行 `cargo build --package aster-platform` | 三个平台均编译成功，无错误和 warning |
 | MV02 | 平台检测正确性 | 在 Windows 上编写临时 main.rs 调用 `create_platform()` 并打印 `user_config_dir()` 和 `system_language()` 结果 | 输出路径为 `C:\Users\<用户名>\AppData\Roaming\Asterism\`，语言为 `zh-CN`（中文系统） |
+
+---
+**完成记录**：
+- 完成时间：2026-06-13 12:00
+- 实际工时：3 小时
+- 提交 Hash：`9f9fa0b`
+- AI自验证结果：✅ AC01-AC05 全部通过（42 单元测试 + 3 doctest 全部通过）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：PlatformError 使用 std::error::Error 手动实现（保持零外部依赖），非 thiserror 派生。剪贴板为 Phase 1 存根。Windows 语言检测使用注册表查询 reg.exe 回退方案。
+
+**上下文交接**：
+- 关键决策：`Platform` trait 作为 `Box<dyn Platform>` 返回，条件编译选择具体实现。`aster-platform` 保持零外部依赖（仅 std），后续 crate 可通过 Box trait object 获取平台能力
+- 新增接口：`create_platform() -> Box<dyn Platform>` — 工厂函数；`Platform::user_config_dir()` / `default_save_dir(game)` / `normalize_path(raw)` / `system_language()` / `try_acquire_single_instance(app_id)` / `launch_process()` / `clipboard_copy/paste`（存根）
+- 已知限制：剪贴板操作返回存根（None/空操作），完整实现依赖 winit 集成（Phase 1 后续）；单实例锁为文件锁简化版，进程崩溃后需手动清理锁文件
+- 建议下一个任务先读取：`engine/aster-platform/src/platform.rs`（trait 定义），`engine/aster-platform/src/lib.rs`（工厂函数 + 测试模式）
 
 ---
 ### PH1-T02 — 实现 `aster-core` 数据模型类型
