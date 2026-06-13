@@ -2,7 +2,7 @@
 //!
 //! 文件路径：engine/aster-core/src/lib.rs
 //! 功能概述：核心数据类型 — 定义整个引擎共享的基础数据结构：
-//!           `Project`（项目元数据）/ `Character`（角色定义）/ `Scene`（场景定义）/
+//!           `Game`（游戏元数据）/ `Character`（角色定义）/ `Scene`（场景定义）/
 //!           `SceneNode`（演出单元枚举）/ `Choice`（选择支）/ `Position`（立绘位置）等。
 //!           本 crate 不依赖任何其他 engine crate（Architecture.md §4.2），
 //!           是整个引擎类型系统的基石。
@@ -22,7 +22,7 @@
 //! | `asset` | `asset.rs` | 资源类型：`AssetId`（newtype）、`AssetType`（8 种资源类别）、`Asset`（资源元数据） |
 //! | `character` | `character.rs` | 角色定义：`Character`（id/name/display_color/description/birthday/default_position/sprites/voice）、`VoiceConfig` |
 //! | `expr` | `expr.rs` | 表达式类型：`Expr`（7 种 AST 节点）、`BinaryOp`（12 种二元运算符）、`UnaryOp`（2 种一元运算符），parser 和 compiler 共享 |
-//! | `project` | `project.rs` | 项目元数据：`Project`、`Resolution`、`ProjectSettings`、`TextSpeed` |
+//! | `game` | `game.rs` | 游戏元数据：`Game`、`Resolution`、`GameSettings`、`TextSpeed` |
 //! | `scene` | `scene.rs` | 场景定义：`Scene`、`SceneNode`（25 种变体）、`Choice`、`Position`、`TransitionSpec` |
 //! | `variable` | `variable.rs` | 变量系统：`VariableStore`（变量表）、`Value`（6 种值类型）、`FlagSet`（旗标集合） |
 //!
@@ -34,7 +34,7 @@
 pub mod asset;
 pub mod character;
 pub mod expr;
-pub mod project;
+pub mod game;
 pub mod scene;
 pub mod variable;
 
@@ -42,6 +42,6 @@ pub mod variable;
 pub use asset::{Asset, AssetId, AssetType};
 pub use character::{Character, VoiceConfig};
 pub use expr::{BinaryOp, Expr, UnaryOp};
-pub use project::{Project, ProjectSettings, Resolution, TextSpeed};
+pub use game::{Game, GameSettings, Resolution, TextSpeed};
 pub use scene::{Choice, Position, Scene, SceneNode, TransitionSpec};
 pub use variable::{FlagSet, Value, VariableStore};

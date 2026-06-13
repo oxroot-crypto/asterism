@@ -472,7 +472,7 @@ pub trait Platform: Send + Sync {
 
 | 类型 | 说明 | 关键字段 |
 |------|------|---------|
-| `Project` | 游戏项目元数据 | name, version, resolution, entry_scene, characters, scenes, settings |
+| `Game` | 游戏项目元数据 | name, version, resolution, entry_scene, characters, scenes, settings |
 | `Character` | 角色定义 | id, name, display_color, description?, birthday?, default_position, sprites: Map\<Emotion, AssetId\>, voice?: VoiceConfig |
 | `VoiceConfig` | 语音配置 | volume: f32（0.0~1.0，默认 1.0） |
 | `Scene` | 场景定义 | id, label, background: Option\<Expr\>, music: Option\<Expr\>, nodes: Vec\<SceneNode\> |
@@ -819,11 +819,11 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
-    Project ||--o{ Character : "defines"
-    Project ||--o{ Scene : "contains"
-    Project ||--o{ Asset : "references"
-    Project ||--o{ Theme : "configures"
-    Project ||--|| ProjectSettings : "has"
+    Game ||--o{ Character : "defines"
+    Game ||--o{ Scene : "contains"
+    Game ||--o{ Asset : "references"
+    Game ||--o{ Theme : "configures"
+    Game ||--|| GameSettings : "has"
 
     Character ||--o{ Asset : "sprites reference"
     Scene ||--o{ SceneNode : "composed of"
@@ -838,7 +838,7 @@ erDiagram
     Theme ||--o{ FontConfig : "declares"
     Theme ||--o{ WidgetStyle : "defines"
 
-    Project {
+    Game {
         string name
         string version
         int_array resolution
@@ -908,7 +908,7 @@ erDiagram
 
 ```
 my_galgame/                              # 项目根目录
-├── project.toml                         # 项目元数据 (TOML)
+├── aster.toml                         # 项目元数据 (TOML)
 ├── build.toml                           # 构建配置 (TOML)
 ├── .asterignore                         # 构建排除规则
 │
@@ -954,13 +954,13 @@ my_galgame/                              # 项目根目录
     └── thumbnails/                      # 生成的缩略图
 ```
 
-**`project.toml` 项目元数据文件格式**（TOML）：
+**`aster.toml` 项目元数据文件格式**（TOML）：
 
 ```toml
-# project.toml — 游戏项目元数据
-# 对应类型：aster_core::Project
+# aster.toml — 游戏项目元数据
+# 对应类型：aster_core::Game
 
-[project]
+[game]
 # 项目名称（显示在窗口标题和关于对话框中）
 name = "My First Visual Novel"
 # 语义化版本号
@@ -968,12 +968,12 @@ version = "0.1.0"
 # 入口场景 ID（对应 scripts/ 下的 .aster 文件名，不含扩展名）
 entry_scene = "prologue"
 
-[project.resolution]
+[game.resolution]
 # 游戏设计分辨率（逻辑像素，引擎自动适配实际窗口大小）
 width = 1920
 height = 1080
 
-[project.settings]
+[game.settings]
 # 默认语言（ISO 639-1 代码，多语言支持 — v1.0.0）
 language = "zh-CN"
 # 默认文字显示速度（instant / slow / normal / fast）
@@ -986,7 +986,7 @@ default_se_volume = 1.0
 default_voice_volume = 1.0
 ```
 
-> `characters` 和 `scenes` 字段由引擎在加载时从 `characters/` 和 `scripts/` 目录自动发现，无需在 `project.toml` 中手动列出。
+> `characters` 和 `scenes` 字段由引擎在加载时从 `characters/` 和 `scripts/` 目录自动发现，无需在 `aster.toml` 中手动列出。
 
 **`.asterchar` 角色定义文件格式**（TOML）：
 
@@ -1193,7 +1193,7 @@ listen('preview-log', (event) => { /* 预览引擎日志 */ })
 IDE 启动引擎子进程时指定预览模式：
 
 ```bash
-aster-runtime --preview --project /path/to/project --ipc-pipe "aster_preview_pipe"
+aster-runtime --preview --game /path/to/game --ipc-pipe "aster_preview_pipe"
 ```
 
 IPC 通道（Unix domain socket / Windows named pipe）传递 JSON 消息：

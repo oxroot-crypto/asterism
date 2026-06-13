@@ -3,7 +3,7 @@
 > **对应路线图**：[Roadmap.md](./Roadmap.md) 中 Phase 1 章节
 > **里程碑目标**：建立从 `.aster` 脚本源码到 GPU 像素的完整管线。引擎可以加载一个 `.aster` 脚本文件，在窗口中展示背景、角色立绘、对话文本（含打字机效果），并通过鼠标点击推进剧情。**不含音频和存档**。
 > **覆盖需求**：REQ-ENG-001~003, REQ-ENG-010~014, REQ-ENG-020~023, NFR-COMPAT-001~003
-> **预估总工时**：144 小时
+> **预估总工时**：162 小时
 > **生成时间**：2026-06-13 10:00
 > **最后更新**：2026-06-13 10:00
 
@@ -17,7 +17,7 @@
 | PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [x] |
 | PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [x] |
 | PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 6h | PH1-T02（依赖 aster-core 类型） | [x] |
-| PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [ ] |
+| PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [x] |
 | PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [ ] |
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [ ] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
@@ -27,12 +27,15 @@
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
 | PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
-| PH1-T15 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14 | [ ] |
-| PH1-T16 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T15 | [ ] |
-| PH1-T17 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
-| PH1-T18 | 主事件循环 — 帧循环 update→render→present | P0 | 8h | PH1-T15, PH1-T16, PH1-T17 | [ ] |
+| PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [ ] |
+| PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [ ] |
+| PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [ ] |
+| PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [ ] |
+| PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [ ] |
+| PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
+| PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 18 个任务 | 已完成: 4 | 进行中: 0 | 待开始: 14
+**统计**：总计 21 个任务 | 已完成: 5 | 进行中: 0 | 待开始: 16
 
 ---
 
@@ -54,37 +57,48 @@ graph TD
     PH1-T12[PH1-T12: compiler 优化Pass]
     PH1-T13[PH1-T13: VM 核心]
     PH1-T14[PH1-T14: VM 变量/跳转]
-    PH1-T15[PH1-T15: SceneManager]
-    PH1-T16[PH1-T16: DialogueController]
-    PH1-T17[PH1-T17: InputManager]
-    PH1-T18[PH1-T18: 主事件循环]
+    PH1-T15[PH1-T15: 游戏清单加载]
+    PH1-T16[PH1-T16: 游戏编译器]
+    PH1-T17[PH1-T17: 游戏上下文]
+    PH1-T18[PH1-T18: SceneManager]
+    PH1-T19[PH1-T19: DialogueController]
+    PH1-T20[PH1-T20: InputManager]
+    PH1-T21[PH1-T21: 主事件循环]
 
     PH1-T02 --> PH1-T03
     PH1-T02 --> PH1-T05
     PH1-T02 --> PH1-T07
     PH1-T02 --> PH1-T08
+    PH1-T02 --> PH1-T15
     PH1-T03 --> PH1-T05
     PH1-T03 --> PH1-T14
     PH1-T04 --> PH1-T05
     PH1-T05 --> PH1-T11
+    PH1-T05 --> PH1-T15
     PH1-T06 --> PH1-T07
     PH1-T07 --> PH1-T08
     PH1-T07 --> PH1-T09
     PH1-T09 --> PH1-T10
     PH1-T11 --> PH1-T12
     PH1-T11 --> PH1-T13
+    PH1-T11 --> PH1-T16
     PH1-T12 --> PH1-T13
+    PH1-T12 --> PH1-T16
     PH1-T13 --> PH1-T14
-    PH1-T07 --> PH1-T15
-    PH1-T08 --> PH1-T15
-    PH1-T10 --> PH1-T16
-    PH1-T13 --> PH1-T15
-    PH1-T14 --> PH1-T15
     PH1-T15 --> PH1-T16
-    PH1-T15 --> PH1-T18
-    PH1-T16 --> PH1-T18
-    PH1-T06 --> PH1-T17
+    PH1-T15 --> PH1-T17
+    PH1-T16 --> PH1-T17
+    PH1-T07 --> PH1-T18
+    PH1-T08 --> PH1-T18
+    PH1-T10 --> PH1-T19
+    PH1-T13 --> PH1-T18
+    PH1-T14 --> PH1-T18
     PH1-T17 --> PH1-T18
+    PH1-T18 --> PH1-T19
+    PH1-T18 --> PH1-T21
+    PH1-T19 --> PH1-T21
+    PH1-T06 --> PH1-T20
+    PH1-T20 --> PH1-T21
 ```
 
 ---
@@ -186,10 +200,10 @@ graph TD
 
 #### 任务说明
 
-1. **开发目标**：定义引擎所有模块共享的核心数据模型类型——`Project`（项目元数据）、`Character`（角色定义）、`Scene`（场景定义）、`SceneNode`（场景节点枚举）、`Choice`（选择支）。所有类型必须派生 `Debug + Clone + Serialize + Deserialize`。
+1. **开发目标**：定义引擎所有模块共享的核心数据模型类型——`Game`（项目元数据）、`Character`（角色定义）、`Scene`（场景定义）、`SceneNode`（场景节点枚举）、`Choice`（选择支）。所有类型必须派生 `Debug + Clone + Serialize + Deserialize`。
 
 2. **涉及文件/组件**（共 5 个）：
-   - 新建：`engine/aster-core/src/project.rs` — `Project` 结构体 + `ProjectSettings`（分辨率、默认音量等）
+   - 新建：`engine/aster-core/src/game.rs` — `Game` 结构体 + `GameSettings`（分辨率、默认音量等）
    - 新建：`engine/aster-core/src/character.rs` — `Character` 结构体（id / name / display_color / description? / birthday? / default_position / sprites 表情映射 / voice?: VoiceConfig）+ `VoiceConfig` 结构体（volume）
    - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（25 变体：Bg / ShowChar / ShowSprite / MoveChar / Emotion / HideChar / HideSprite / Dialogue / Narration / Menu / Branch / SetVariable / SetFlag / UnsetFlag / ToggleFlag / Music / StopMusic / PlaySE / Wait / Effect / Jump / Goto / Call / Return / Label）+ `Choice` + `Position` + `TransitionSpec` 结构体
    - 修改：`engine/aster-core/src/lib.rs` — 添加 `mod project; mod character; mod scene;` + `pub use` 重导出所有公开类型
@@ -198,7 +212,7 @@ graph TD
 3. **实现要点**：
    - 所有结构体/枚举必须派生 `Debug, Clone, Serialize, Deserialize`
    - `SceneNode` 是核心枚举，每个 variant 携带该节点类型的专有数据（如 `Dialogue { speaker: String, text: String, voice_id: Option<...> }`）
-   - `Project` 结构体字段对应 `project.toml` 的 `[project]` section（见 Architecture.md §5.2）
+   - `Game` 结构体字段对应 `aster.toml` 的 `[game]` section（见 Architecture.md §5.2）
    - `Character.sprites` 使用 `HashMap<String, AssetId>`（key 为表情名如 "default"/"smile"，value 为资源 ID）
    - `Scene.id` 格式为 `"chapter/scene_name"` 的路径字符串
    - `Choice` 包含 `text: Expr`（显示文本）、`target: Expr`（跳转目标标签）、`condition: Option<Expr>`（可选的条件表达式），所有字段均为表达式类型以支持变量引用
@@ -209,7 +223,7 @@ graph TD
      > REQ-ENG-003: 支持整型、浮点、字符串、布尔四种值类型的变量存储
    - 需求依据（Requirements.md §2.1.3）：
      > REQ-ENG-022: 在脚本指定位置显示一组选项（2-N 个），玩家点击其中一个选项后跳转到对应脚本标签
-   - 架构依据（Architecture.md §4.2 核心类型清单）：`Project` / `Character` / `Scene` / `SceneNode` / `Choice` 的字段定义
+   - 架构依据（Architecture.md §4.2 核心类型清单）：`Game` / `Character` / `Scene` / `SceneNode` / `Choice` 的字段定义
    - 已有接口：无前置 crate 依赖，仅依赖 `serde`（workspace 级别已声明）
    - `AssetId` 类型将在 PH1-T03 中定义，本任务的 `Character.sprites` 字段暂时使用 `String` 占位，PH1-T03 完成后修改为 `AssetId`
 
@@ -225,7 +239,7 @@ graph TD
 
 | 编号 | 验收项 | 验证方式 | 预期结果 |
 |------|--------|----------|----------|
-| AC01 | `Project` 结构体可正确序列化为 TOML 并反序列化回来 | 单元测试：构造一个完整的 `Project` 实例 → `toml::to_string` → `toml::from_str` → 断言字段相等 | 序列化/反序列化 round-trip 一致 |
+| AC01 | `Game` 结构体可正确序列化为 TOML 并反序列化回来 | 单元测试：构造一个完整的 `Game` 实例 → `toml::to_string` → `toml::from_str` → 断言字段相等 | 序列化/反序列化 round-trip 一致 |
 | AC02 | `SceneNode` 枚举的所有 variant 均可正确创建和模式匹配 | 单元测试：分别创建 `Dialogue`、`Menu`、`ShowChar` 等 variant，断言字段值正确 | 所有 variant 构造和访问正确 |
 | AC03 | `Character` 结构体的 `sprites` 映射可正确插入和查询表情 | 单元测试：`char.sprites.insert("smile".into(), "smile.png".into())`，然后 `char.sprites.get("smile")` 断言返回 Some | 表情映射操作正确 |
 | AC04 | `Scene` 结构体的 JSON 序列化 round-trip 正确 | 单元测试：`serde_json::to_string(&scene)` → `serde_json::from_str` → 断言 `scene.id` 和 `scene.nodes.len()` 一致 | JSON 序列化 round-trip 正确 |
@@ -252,7 +266,7 @@ graph TD
 - 新增接口：`SceneNode::{Bg, ShowSprite, MoveChar, Emotion, HideSprite, ToggleFlag, Music, StopMusic, Goto}` — 各 1-7 字段；`Character::{description, birthday, default_position, voice}` — 可选字段 + 新类型；`VoiceConfig { volume }` — 语音配置；`TextSpeed::Custom(f32)` — 自定义 ms/char 速率；`Position::to_coords()` — 归一化坐标转换
 - 新增数据表：无（纯类型定义，无持久化）
 - 已知限制：Video 变体留给 Phase 5；Effect 不应用于视频播放（语义不同）；ShowSprite 目前用 asset_path 标识（非唯一 ID），同一资源多次显示时 HideSprite 行为未精确定义
-- 建议下一个任务先读取：`engine/aster-core/src/scene.rs`（SceneNode 完整定义），`engine/aster-core/src/project.rs`（TextSpeed 自定义 serde 实现模式），`docs/Architecture.md` §4.2（更新后的类型表）
+- 建议下一个任务先读取：`engine/aster-core/src/scene.rs`（SceneNode 完整定义），`engine/aster-core/src/game.rs`（TextSpeed 自定义 serde 实现模式），`docs/Architecture.md` §4.2（更新后的类型表）
 
 ---
 ### PH1-T03 — 实现 `aster-core` 资源与变量类型
@@ -440,7 +454,7 @@ graph TD
 | **对应需求** | REQ-ENG-001（DSL 脚本解析 — 完整 AST 输出）, REQ-ENG-022（选择支 AST 节点） |
 | **对应架构模块** | `aster-parser`（参考 Architecture.md §4.3）+ `aster-core`（新增 `Expr`/`BinaryOp`/`UnaryOp` 类型） |
 | **前置依赖** | PH1-T02（aster-core 数据模型类型）, PH1-T03（AssetId/Value 等类型）, PH1-T04（PEG 语法 + 解析器框架） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -506,6 +520,20 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 有效脚本完整解析 | 在终端执行 `cargo test --package aster-parser`，观察测试输出 | 所有测试通过，特别是包含完整 scene（bg+角色+对话+menu+jump）的解析测试 |
 | MV02 | 错误信息可读性 | 编写一个含有语法错误的 .aster 测试文件（如少写闭合引号），运行解析器，查看返回的错误信息 | 错误信息为中文，包含"第X行第Y列"、具体原因描述和修复建议 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-13 22:30
+- 实际工时：5 小时
+- AI自验证结果：✅ AC01-AC07 全部通过（83 单元测试 + 3 doctest，零 clippy warning）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：builder.rs 原始单文件 2000+ 行，按用户要求拆分为 4 模块（mod.rs / expr.rs / position.rs / statements.rs），职责清晰。实际交付文件数与计划不一致（拆分为模块目录而非单文件），但功能等价且更易维护。
+
+**上下文交接**：
+- 关键决策：AstBuilder 不持有状态，全部为关联函数；`parse_script()` 返回 `Result<aster_core::Scene, Vec<ParseError>>` 直接产出编译器可消费的 AST；表达式按 pest 语法优先级链递归下降，每层左结合折叠；position / transition 规则为命名规则（非静默），需在构建时解包一层到内部变体
+- 新增接口：`AstBuilder::build(Pairs<Rule>, &str) -> Result<Scene, Vec<ParseError>>` — 顶层入口；`parse_script(&str) -> Result<Scene, Vec<ParseError>>` — 公共 API；`AstBuilder` 从 `aster_parser` crate 重导出
+- 已知限制：部分 builder 方法使用 `inner.next().unwrap()`（grammar 保证非空但未做防御性检查）；flag_ref 在 Expr 中统一映射为 `Expr::Variable`（`%` 前缀被去除，compiler 需自行区分变量与旗标）；空文件解析返回空 Scene（id=""）
+- 建议下一个任务先读取：`engine/aster-parser/src/builder/mod.rs`（架构概览）、`engine/aster-parser/src/builder/statements.rs`（所有语句构建逻辑）、`engine/aster-core/src/scene.rs`（SceneNode 25 变体定义）
 
 ---
 ### PH1-T06 — wgpu 设备初始化 + 窗口创建
@@ -1097,7 +1125,7 @@ graph TD
 
 5. **🚫 本任务不做什么**：
    - 不实现变量/旗标的 VM 操作码处理逻辑（`SET_VAR`/`SET_FLAG`/`JUMP_IF_FLAG` 等 — 属于 PH1-T14）
-   - 不实现 SceneManager（VM Action→Renderer 命令转换 — 属于 PH1-T15）
+   - 不实现 SceneManager（VM Action→Renderer 命令转换 — 属于 PH1-T18）
    - 不实现调用栈的完整子例程语义（Call/Return 执行 — 属于 PH1-T14）
 
 #### 验收标准
@@ -1175,7 +1203,7 @@ graph TD
 
 5. **🚫 本任务不做什么**：
    - 不实现表达式求值（算术运算、字符串拼接等——AST 中的复杂表达式由编译器降级为多条简单指令，VM 只执行基本操作）
-   - 不实现 SceneManager 的场景切换逻辑（属于 PH1-T15）
+   - 不实现 SceneManager 的场景切换逻辑（属于 PH1-T18）
    - 不实现存档时的 VM 状态快照（属于 Phase 2 `aster-save`）
 
 #### 验收标准
@@ -1199,7 +1227,280 @@ graph TD
 | MV02 | 场景跳转与变量保持 | 场景 A 中设置 `$score = 100` → jump 到场景 B → 场景 B 中读取 `$score` | `$score` 在场景 B 中仍然为 100，跳转未丢失变量 |
 
 ---
-### PH1-T15 — 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换
+### PH1-T15 — 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现）
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 6 小时 |
+| **对应需求** | REQ-ENG-003（变量与旗标的数据载体 — 角色/场景引用）, REQ-ENG-023（跨场景跳转 — 场景发现） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §5.2 — 项目磁盘布局 + aster.toml / .asterchar 格式） |
+| **前置依赖** | PH1-T02（Game / Character / Scene 类型定义）, PH1-T05（AST 构建器 — .asterchar TOML 解析复用 parser 基础设施） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现游戏清单加载器 `GameLoader`——将磁盘上的项目目录结构加载为结构化的 `GameManifest`（项目清单），包含项目元数据、所有角色定义、所有场景清单。这是引擎启动和项目编译的共同入口，解决"单场景 vs 整个项目"的断层。
+
+2. **涉及文件/组件**（共 3 个）：
+   - 新建：`engine/aster-runtime/src/game_loader.rs` — `GameLoader` 结构体 + `GameManifest` 结构体
+   - 新建：`engine/aster-runtime/src/game_manifest.rs` — `GameManifest` 结构体：`project: Game` + `characters: HashMap<String, Character>` + `scenes: Vec<SceneEntry>` + `build_config: BuildConfig`
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `GameLoader`、`GameManifest`
+
+3. **实现要点**：
+   - **GameManifest 结构体**：
+     ```rust
+     pub struct GameManifest {
+         pub project: Game,                          // aster.toml 内容
+         pub characters: HashMap<String, Character>,    // 所有角色（key = 角色 ID）
+         pub scenes: Vec<SceneEntry>,                   // 场景清单
+         pub build_config: BuildConfig,                 // build.toml 内容
+     }
+     
+     pub struct SceneEntry {
+         pub scene_id: String,      // 如 "chapter1/prologue"
+         pub file_path: PathBuf,    // 如 "scripts/chapter1/prologue.aster"
+         pub is_entry: bool,        // 是否为入口场景（与 project.entry_scene 匹配）
+     }
+     ```
+   - **加载流程**（`GameLoader::load(project_root: &Path) -> Result<GameManifest, RuntimeError>`）：
+     1. 读取 `{project_root}/aster.toml` → TOML 反序列化为 `aster_core::Game`
+     2. 读取 `{project_root}/build.toml`（可选，不存在时使用默认值）→ TOML 反序列化为 `BuildConfig`
+     3. 扫描 `{project_root}/characters/` 目录 → 遍历所有 `*.asterchar` 文件 → 每个文件 TOML 反序列化为 `aster_core::Character` → 以 `character.id` 为 key 插入 HashMap
+     4. 扫描 `{project_root}/scripts/` 目录 → 递归遍历所有 `*.aster` 文件 → 每个文件生成 `SceneEntry`（scene_id = 相对路径去掉 `scripts/` 前缀和 `.aster` 扩展名）
+     5. 标记入口场景（`scene_id == project.entry_scene`）
+   - **BuildConfig 结构体**（新增于 `aster-core` 或 `aster-runtime`）：
+     ```rust
+     pub struct BuildConfig {
+         pub compile: CompileConfig,     // target / optimize / minify
+         pub include: GlobPatterns,      // 构建包含的 glob 模式
+         pub exclude: GlobPatterns,      // 构建排除的 glob 模式
+         pub archive: ArchiveConfig,     // 归档格式 / 加密
+     }
+     ```
+   - **.asterchar 解析**：复用 `toml` crate 直接反序列化为 `aster_core::Character`（PH1-T02 已定义完整类型 + serde 派生），不需要 pest 解析
+   - **错误处理**：
+     - `aster.toml` 不存在 → 明确错误，提示项目根目录不正确
+     - `.asterchar` 解析失败 → 收集所有角色的解析错误（继续解析其他角色文件），返回带文件名的错误列表
+     - `scripts/` 目录为空 → 警告（warn），不阻断加载
+     - `entry_scene` 在场景清单中不存在 → 错误，提示入口场景未找到
+
+4. **关联上下文**：
+   - 架构依据（Architecture.md §5.2）：
+     > `aster.toml` 项目元数据文件格式、`.asterchar` 角色定义文件格式、`build.toml` 构建配置文件格式
+     > `characters` 和 `scenes` 字段由引擎在加载时从 `characters/` 和 `scripts/` 目录自动发现
+   - 已有接口：PH1-T02 的 `Game`、`Character`、`Scene` 类型（均派生 `Serialize + Deserialize`，可直接 TOML 反序列化）
+   - 参考模板：`templates/default_project/` 下的 `aster.toml`、`build.toml`、`characters/*.asterchar`
+
+5. **🚫 本任务不做什么**：
+   - 不编译 `.aster` 场景文件（属于 PH1-T16 GameCompiler）
+   - 不解析 `.asterchar` 的自定义 DSL（.asterchar 是 TOML 格式，无需经过 pest）
+   - 不实现资源文件的扫描和验证（属于 Phase 2 `aster-asset`）
+   - 不处理 `.asterignore` 模式匹配（属于 PH1-T16 编译流程）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 完整项目目录加载成功 | 单元测试：以 `templates/default_project/` 为输入 → `GameLoader::load()` → 断言 `GameManifest.project.name == "My First Visual Novel"`、`characters.len() == 2`（sayori + akane）、`scenes.len() == 2`（prologue + sakura_road） | 项目清单完整正确 |
+| AC02 | `entry_scene` 正确标记 | 单元测试：加载后断言 `scenes` 中 `prologue` 的 `is_entry == true`，其他为 `false` | 入口场景标记正确 |
+| AC03 | `aster.toml` 不存在时返回明确错误 | 单元测试：指向空目录调用 `load()` → 断言返回 `Err`，错误消息包含 "aster.toml" | 错误消息有指导性 |
+| AC04 | `.asterchar` 文件缺失可选字段时不报错 | 单元测试：创建含最少字段（仅 id + name）的 `.asterchar` → `load()` 成功，使用 serde default 填充可选字段 | 可选字段优雅降级 |
+| AC05 | `build.toml` 不存在时使用默认配置 | 单元测试：项目中无 `build.toml` → `load()` 成功，`BuildConfig` 为默认值（compile.target="asterbyte", optimize=true 等） | 默认配置合理 |
+| AC06 | `entry_scene` 不存在于场景清单时返回错误 | 单元测试：`aster.toml` 的 `entry_scene = "nonexistent"` → 断言返回 `Err` | 入口场景校验正确 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 加载模板游戏 | 编写临时 main.rs，调用 `GameLoader::load("templates/default_project/")`，打印 manifest 的 Debug 输出 | 输出包含完整项目名、2 个角色（sayori/akane 含 sprites 映射）、2 个场景路径 |
+| MV02 | 空 `characters/` 目录 | 创建临时项目（无 characters 子目录），调用 load | 加载成功，`characters` 为空 HashMap（不报错） |
+
+---
+### PH1-T16 — 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml）
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 8 小时 |
+| **对应需求** | REQ-ENG-002（字节码编译 — 游戏级）, REQ-ENG-023（跨场景跳转 — 引用验证） |
+| **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4 — 编译管线 + §5.2 build.toml） |
+| **前置依赖** | PH1-T11（Compiler 单场景编译）, PH1-T12（优化 Pass）, PH1-T15（GameLoader — 提供场景清单和 build 配置） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：在单场景编译器（PH1-T11）基础上实现游戏级编译。将项目中所有 `.aster` 场景批量编译为 `CompiledGame`（多场景字节码集合），解析并验证跨场景 `goto` / `jump` 引用，应用 `build.toml` 中的编译配置。
+
+2. **涉及文件/组件**（共 4 个）：
+   - 新建：`engine/aster-compiler/src/game_compiler.rs` — `GameCompiler` 结构体 + `CompiledGame` 结构体
+   - 新建：`engine/aster-compiler/src/build_config.rs` — `BuildConfig` / `CompileConfig` 结构体（从 `aster-runtime` 或 `aster-core` 移动到此，或直接复用 `GameManifest` 中的配置）
+   - 修改：`engine/aster-compiler/src/compiler.rs` — 为 `Compiler` 添加编译配置参数（optimize/minify 开关）
+   - 修改：`engine/aster-compiler/src/lib.rs` — 模块声明 + 公开导出 `GameCompiler`、`CompiledGame`
+
+3. **实现要点**：
+   - **CompiledGame 结构体**：
+     ```rust
+     pub struct CompiledGame {
+         pub game_name: String,
+         pub game_version: String,
+         pub entry_scene_id: String,                        // 入口场景
+         pub scenes: HashMap<String, CompiledScene>,        // scene_id → 编译产物
+         pub characters: HashMap<String, Character>,        // 角色表（来自 GameManifest）
+         pub constant_pool: Vec<String>,                    // 全局常量池（可选，各场景独立时不需要）
+         pub build_info: BuildInfo,                         // 构建信息
+     }
+     
+     pub struct BuildInfo {
+         pub source_file_count: usize,
+         pub total_instructions: usize,
+         pub optimization_level: String,    // "none" | "normal" | "aggressive"
+         pub build_timestamp: String,       // ISO 8601
+     }
+     ```
+   - **编译流程**（`GameCompiler::compile(manifest: &GameManifest) -> Result<CompiledGame, Vec<CompileError>>`）：
+     1. 读取 `manifest.build_config.compile` 配置（target / optimize / minify）
+     2. 遍历 `manifest.scenes` 中所有 `SceneEntry`
+     3. 对每个场景：读取 `.aster` 源码 → `aster_parser::parse_script()` → `Compiler::compile()`（传入 optimize/minify 配置）→ 收集到 `CompiledGame.scenes`
+     4. 单场景编译失败不阻断整体：收集所有场景的错误，最后统一返回
+     5. 场景全部编译完成后，执行**跨场景引用验证**（见下）
+     6. 填充 `BuildInfo` 统计信息
+   - **跨场景引用验证**（Phase 1 新增语义检查）：
+     - 收集所有场景的 `label_table`（label_name → 所属 scene_id）
+     - 检查所有 `goto` 指令的目标：`goto "chapter2/scene_name"` → 目标场景是否存在于 `CompiledGame.scenes` 中
+     - 如果 `goto` 带有 `label:` 参数 → 检查目标标签是否存在于目标场景的 `label_table` 中
+     - 场景内 `jump` 的目标标签是否存在（PH1-T11 已有此检查，此处强化跨场景）
+     - `goto` 目标不存在 → `CompileError`（携带源位置和目标场景名）
+   - **build.toml 配置应用**：
+     - `[compile].target`："asterbyte"（默认，编译为字节码）/ "ast"（调试用，仅解析不编译）
+     - `[compile].optimize`：true → 启用 PH1-T12 的 4 个优化 Pass；false → 跳过优化
+     - `[compile].minify`：true → 去除字节码中的调试元数据（如注释、原始行号映射）——Phase 1 预留，实际 minify 由后续实现
+   - **与单场景 Compiler 的关系**：
+     - PH1-T11 的 `Compiler::compile(scene: &Scene) -> Result<CompiledScene, Vec<CompileError>>` 保持不变
+     - `GameCompiler` 内部循环调用 `Compiler::compile()`，不重复实现编译逻辑
+     - 如果 `build_config.compile.target == "ast"`，则跳过编译，直接序列化 AST（调试用）
+
+4. **关联上下文**：
+   - 需求依据（Requirements.md §2.1.1 / §2.1.3）：
+     > REQ-ENG-002: 引擎必须将 AST 编译为字节码
+     > REQ-ENG-023: 跨文件跳转正确，跳转不导致变量丢失
+   - 架构依据（Architecture.md §4.4 + §5.2）：
+     > 编译管线：AST→IR→Bytecode + 4 个优化 Pass
+     > `build.toml` 由 `aster-pack` CLI 和 IDE 构建流程读取
+   - 已有接口：PH1-T11 的 `Compiler::compile()` 和 `CompiledScene`；PH1-T12 的 `Optimizer`；PH1-T15 的 `GameManifest`
+   - 注意：`aster-compiler` 不直接依赖 `aster-runtime`。`BuildConfig` 可定义在 `aster-core` 中（与 `Game` 同级），供两方共享。或者 `GameCompiler` 接受泛化的配置参数而非 `GameManifest` 整体
+
+5. **🚫 本任务不做什么**：
+   - 不修改单场景 `Compiler` 的核心编译逻辑（仅通过配置参数控制行为）
+   - 不实现资源文件收集/过滤（`include`/`exclude` glob 匹配 — 属于 Phase 2 `aster-asset` 和 Phase 3 IDE 构建管线）
+   - 不实现 `.asterbyte` 文件的写入（文件 I/O 属于 PH1-T18 SceneManager 和 Phase 3 IDE）
+   - 不实现归档打包（.asterarchive — 属于 Phase 6 `aster-pack`）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | 模板项目全部场景编译成功 | 单元测试：加载 `templates/default_project/` → `GameCompiler::compile()` → 断言 `CompiledGame.scenes.len() == 2`、每个场景 instructions 非空 | 批量编译成功 |
+| AC02 | 跨场景 `goto` 目标存在时验证通过 | 单元测试：场景 A 含 `goto "chapter1/sakura_road"`，目标场景存在 → `compile()` 成功，无 CompileError | 有效跨场景引用通过 |
+| AC03 | 跨场景 `goto` 目标不存在时返回错误 | 单元测试：场景 A `goto "nonexistent_scene"` → `compile()` 返回 `Err`，CompileError 指明不存在的场景名 | 无效跨场景引用被检测 |
+| AC04 | `goto` 带 label 到不存在的标签返回错误 | 单元测试：`goto "chapter1/sakura_road" label: "bad_label"`，目标存在但标签不存在 → `Err` | 跨场景标签验证正确 |
+| AC05 | `optimize = false` 时跳过优化 Pass | 单元测试：`build.toml` 设 `optimize = false` → 编译产物指令数与优化前相同（无常量折叠等变换） | 优化开关生效 |
+| AC06 | 编译失败时不阻断其他场景 | 单元测试：3 个场景中 1 个有语法错误 → `compile()` 返回 `Err` 且含 1 条 ParseError，但其他 2 个场景的编译仍被执行（如需要，可先收集全量错误） | 错误收集而非短路 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 项目批量编译 | 编写临时 main.rs，加载 `templates/default_project/` → `GameCompiler::compile()`，打印 `BuildInfo` | 显示 2 个场景、总指令数、优化级别，无编译错误 |
+| MV02 | 跨场景引用错误提示 | 故意修改 `prologue.aster` 中的 `goto` 目标为一个不存在的场景，重新编译 | 错误信息包含源文件、行号、不存在的目标场景名 |
+
+---
+### PH1-T17 — 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航支持）
+
+| 属性 | 内容 |
+|------|------|
+| **优先级** | P0 |
+| **预估工时** | 4 小时 |
+| **对应需求** | REQ-ENG-023（跨场景跳转 — 运行时场景切换） |
+| **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — SceneManager 状态机 + §5.2 项目磁盘布局） |
+| **前置依赖** | PH1-T15（GameLoader — 提供角色表）, PH1-T16（GameCompiler — 提供 CompiledGame） |
+| **状态** | [ ] 未完成 |
+
+#### 任务说明
+
+1. **开发目标**：实现游戏上下文 `GameContext`——SceneManager 和渲染器需要访问的共享项目状态容器。持有编译后的所有场景字节码、角色定义表（含立绘→资源路径映射）、项目配置（分辨率、默认音量等）。提供跨场景导航的核心能力：`resolve_scene(scene_id) -> &CompiledScene`。
+
+2. **涉及文件/组件**（共 2 个）：
+   - 新建：`engine/aster-runtime/src/game_context.rs` — `GameContext` 结构体 + 场景导航/角色查询方法
+   - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `GameContext`
+
+3. **实现要点**：
+   - **GameContext 结构体**：
+     ```rust
+     pub struct GameContext {
+         pub project: Game,                              // 项目元数据
+         pub characters: HashMap<String, Character>,        // 角色表（key = 角色 ID）
+         pub scenes: HashMap<String, CompiledScene>,        // 已编译场景（key = scene_id）
+         pub entry_scene_id: String,                        // 入口场景 ID
+         pub resolution: (u32, u32),                        // 设计分辨率
+         pub default_text_speed: TextSpeed,                 // 默认文字速度
+         pub default_bgm_volume: f32,
+         pub default_se_volume: f32,
+         pub default_voice_volume: f32,
+     }
+     ```
+   - **核心方法**：
+     - `get_scene(scene_id: &str) -> Option<&CompiledScene>` — 按 ID 获取已编译场景
+     - `get_character(char_id: &str) -> Option<&Character>` — 按 ID 获取角色定义
+     - `get_character_sprite(char_id: &str, emotion: &str) -> Option<AssetId>` — 获取角色特定表情的立绘资源 ID
+     - `resolve_sprite_path(char_id: &str, emotion: &str) -> Option<PathBuf>` — 按约定路径解析立绘文件路径（`assets/sprites/{char_id}/{emotion}.png`）
+     - `resolve_voice_path(char_id: &str, number: &str) -> Option<PathBuf>` — 按约定路径解析语音文件路径（`assets/voices/{char_id}/{number}.ogg`）
+     - `is_scene_loaded(scene_id: &str) -> bool` — 检查场景是否已编译并存在
+   - **构造方式**：
+     - `GameContext::new(manifest: GameManifest, compiled: CompiledGame) -> Self`
+     - 从 `GameManifest` 获取项目配置和角色表
+     - 从 `CompiledGame` 获取已编译场景集合
+     - 合并并验证一致性（如入口场景是否在 compiled.scenes 中）
+   - **角色立绘路径约定**（Architecture.md §5.2）：
+     - 立绘：`assets/sprites/{角色id}/{表情名}.png`
+     - 语音：`assets/voices/{角色id}/{编号}.ogg`
+     - `resolve_xxx_path` 方法封装此约定，调用方（SceneManager → Renderer）无需硬编码路径规则
+
+4. **关联上下文**：
+   - 架构依据（Architecture.md §5.2）：
+     > 资源查找约定（无前缀，按角色 ID 目录组织）
+     > 立绘：assets/sprites/<角色id>/<表情>.png、语音：assets/voices/<角色id>/<编号>.ogg
+   - 已有接口：PH1-T15 的 `GameManifest`；PH1-T16 的 `CompiledGame`；PH1-T02 的 `Game`、`Character`、`TextSpeed`
+   - 下游消费者：PH1-T18（SceneManager）通过 `GameContext` 获取场景和角色信息
+
+5. **🚫 本任务不做什么**：
+   - 不持有渲染器/音频系统引用（`GameContext` 是纯数据容器）
+   - 不实现项目根目录路径的存储（由 `App` 持有，SceneManager 需要时通过参数传入）
+   - 不实现资源加载/缓存（属于 Phase 2 `aster-asset`，Phase 1 由 Renderer 直接按路径加载）
+
+#### 验收标准
+
+##### 🔧 AI自验证（自动化测试）
+
+| 编号 | 验收项 | 验证方式 | 预期结果 |
+|------|--------|----------|----------|
+| AC01 | `get_scene("prologue")` 返回已编译场景 | 单元测试：构造 `GameContext`（含 2 个场景） → 断言 `get_scene("prologue").is_some()`、`get_scene("nonexistent").is_none()` | 场景查询正确 |
+| AC02 | `get_character("sayori")` 返回完整角色定义 | 单元测试：断言 `get_character("sayori").unwrap().name == "小百合"`，sprites 映射包含 "default"/"smile" 等 | 角色查询正确 |
+| AC03 | `get_character_sprite("sayori", "smile")` 返回对应 AssetId | 单元测试：角色 sayori.sprites["smile"] = AssetId(x) → 断言返回 Some(AssetId(x)) | 表情→资源映射正确 |
+| AC04 | `resolve_sprite_path("sayori", "default")` 返回约定路径 | 单元测试：断言路径为 `assets/sprites/sayori/default.png`（正斜杠） | 路径约定正确 |
+| AC05 | 空场景集合不 panic | 单元测试：构造 scenes 为空的 `GameContext` → `get_scene("any")` 返回 None，不 panic | 边界情况安全 |
+
+##### 👤 人工测试验证
+
+| 编号 | 验证项 | 操作步骤 | 预期结果 |
+|------|--------|----------|----------|
+| MV01 | 数据完整性 | 加载模板游戏 → 构建 GameContext → 打印角色数和场景数 | 2 个角色、2 个场景，角色 sprites 映射正确 |
+
+---
 
 | 属性 | 内容 |
 |------|------|
@@ -1207,16 +1508,16 @@ graph TD
 | **预估工时** | 12 小时 |
 | **对应需求** | REQ-ENG-020（鼠标点击推进）, REQ-ENG-021（键盘推进）, REQ-ENG-022（选择支交互）, REQ-ENG-023（场景跳转） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — SceneManager 状态机） |
-| **前置依赖** | PH1-T07（背景渲染）, PH1-T08（立绘渲染）, PH1-T13（VM 核心）, PH1-T14（VM 变量/跳转） |
+| **前置依赖** | PH1-T07（背景渲染）, PH1-T08（立绘渲染）, PH1-T13（VM 核心）, PH1-T14（VM 变量/跳转）, PH1-T17（GameContext — 场景和角色数据来源） |
 | **状态** | [ ] 未完成 |
 
 #### 任务说明
 
-1. **开发目标**：实现场景状态机 `SceneManager`——管理场景的加载→执行→结束生命周期，将 VM 发出的 `VmAction` 转换为具体的渲染器命令（背景切换、立绘显示/隐藏、对话显示等），协调 VM 和 Renderer 的交互。这是引擎运行时的核心编排层。
+1. **开发目标**：实现场景状态机 `SceneManager`——管理场景的加载→执行→结束生命周期，将 VM 发出的 `VmAction` 转换为具体的渲染器命令（背景切换、立绘显示/隐藏、对话显示等），协调 VM 和 Renderer 的交互。SceneManager 持有 `GameContext`，通过它获取已编译的场景字节码和角色定义，支持跨场景 `goto` 导航。这是引擎运行时的核心编排层。
 
 2. **涉及文件/组件**（共 5 个）：
-   - 新建：`engine/aster-runtime/src/scene_manager.rs` — `SceneManager` 结构体：场景加载、VM 执行循环、VM Action 分发
-   - 新建：`engine/aster-runtime/src/command_bridge.rs` — `CommandBridge` 结构体：`EngineCommand` → 渲染器方法调用的映射（`SetBg` → `renderer.set_background()`、`ShowChar` → `renderer.show_character()` 等）
+   - 新建：`engine/aster-runtime/src/scene_manager.rs` — `SceneManager` 结构体：持有 `GameContext`、场景加载/切换、VM 执行循环、VM Action 分发
+   - 新建：`engine/aster-runtime/src/command_bridge.rs` — `CommandBridge` 结构体：`EngineCommand` → 渲染器方法调用的映射（`SetBg` → `renderer.set_background()`、`ShowChar` → `renderer.show_character()` 等），通过 `GameContext` 解析角色 ID→立绘路径
    - 新建：`engine/aster-runtime/src/error.rs` — `RuntimeError` 枚举（场景加载失败、VM 执行错误、渲染错误等）
    - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `SceneManager`、`RuntimeError`
    - 修改：`engine/aster-runtime/Cargo.toml` — 添加依赖：`aster-core`、`aster-parser`、`aster-compiler`、`aster-vm`、`aster-renderer`、`aster-platform`
@@ -1234,11 +1535,19 @@ graph TD
          Ended,              // 场景结束
      }
      ```
+   - **初始化**：`SceneManager::new(project_context: GameContext) -> Self` — 接收已加载+已编译的游戏上下文
    - **场景加载流程**：
-     1. `load_scene(scene_id: &str)` → 从文件系统读取 `.aster` 脚本（或 `.asterbyte` 预编译文件）
-     2. 如果是 `.aster` 源码 → 调用 `aster_parser::parse()` → `aster_compiler::compile()`
-     3. 如果是 `.asterbyte` 预编译文件 → 直接反序列化 `CompiledScene`
-     4. 初始化 VM 上下文（变量/旗标在场景间保持，不清除）
+     1. `load_scene(scene_id: &str)` → 从 `GameContext::get_scene(scene_id)` 获取 `&CompiledScene`
+     2. 如果场景未编译（开发模式下可能实时编译）→ 调用 `aster_parser::parse()` → `aster_compiler::compile()`
+     3. 初始化 VM 上下文（变量/旗标在场景间保持，不清除——由 VM 自身的 `variables` 和 `flags` 字段保证）
+     4. 设置 VM 的程序计数器指向场景入口（scene 的第一条指令）
+   - **跨场景导航**（Phase 1 新增）：
+     - VM 执行到 `goto "chapter2/scene_name"` 时发出 `EngineCommand::GotoScene { scene_id, label: Option<String> }`
+     - `CommandBridge` 收到后调用 `SceneManager::load_scene(scene_id)`，如果带 label 则设置 VM 的 PC 到目标标签
+     - 变量/旗标在 VM 实例中保持不变（SceneManager 不重新创建 VM，仅切换执行的字节码）
+   - **角色渲染命令**：
+     - `ShowChar { char_id, pos, emotion }` → `CommandBridge` 通过 `GameContext::resolve_sprite_path(char_id, emotion)` 获取立绘文件路径 → 调用 `renderer.show_character(path, pos)`
+     - 不再需要在 `.aster` 脚本中写死资源路径，角色 ID + 表情名即可
    - **执行循环**（每帧调用 `update()`）：
      1. 如果 `state == Playing`：调用 `vm.step()` 获取 `VmAction`
      2. 根据 `VmAction` 分发：
@@ -1248,7 +1557,7 @@ graph TD
         - `SceneEnd` → 切换到 `Ended` 状态
         - `Command(cmd)` → 通过 `CommandBridge` 转发给 Renderer
    - **CommandBridge**：
-     - 持有对 `Renderer` trait object 的引用
+     - 持有对 `Renderer` trait object 的引用 + `&GameContext`
      - `dispatch(cmd: EngineCommand)` 方法 → match 每个 command variant，调用对应的 renderer 方法
      - Phase 1 不支持的命令（`PlayBgm`、`PlaySe`、`PlayVoice` 等）→ 记录 `warn!` 日志并忽略（不崩溃）
    - **用户输入处理**：
@@ -1296,7 +1605,7 @@ graph TD
 | MV03 | 键盘推进 | 在对话等待时按 Enter 键或 Space 键 | 键盘推进与鼠标点击效果一致，长按不重复触发 |
 
 ---
-### PH1-T16 — 实现 DialogueController — 对话流管理 + 打字机状态控制
+### PH1-T19 — 实现 DialogueController — 对话流管理 + 打字机状态控制
 
 | 属性 | 内容 |
 |------|------|
@@ -1304,7 +1613,7 @@ graph TD
 | **预估工时** | 6 小时 |
 | **对应需求** | REQ-ENG-014（打字机效果 — 运行时控制）, REQ-ENG-020（点击推进对话） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — DialogueController） |
-| **前置依赖** | PH1-T10（Typewriter 效果）, PH1-T15（SceneManager — 对话命令来源） |
+| **前置依赖** | PH1-T10（Typewriter 效果）, PH1-T18（SceneManager — 对话命令来源） |
 | **状态** | [ ] 未完成 |
 
 #### 任务说明
@@ -1351,7 +1660,7 @@ graph TD
      > REQ-ENG-014: 字符逐字出现，速度可调；点击后立即显示全部剩余文本
      > REQ-ENG-020: 点击鼠标左键推进对话到下一句。在非选择支状态下，点击等价于"继续"
    - 架构依据（Architecture.md §4.11）：DialogueController 在 SceneManager 状态机中的位置（Playing 状态的核心子状态机）
-   - 已有接口：PH1-T10 的 `Typewriter`（`update()`、`skip()`、`is_complete()`、`visible_chars()`）；PH1-T15 的 `SceneManager`
+   - 已有接口：PH1-T10 的 `Typewriter`（`update()`、`skip()`、`is_complete()`、`visible_chars()`）；PH1-T18 的 `SceneManager`
 
 5. **🚫 本任务不做什么**：
    - 不实现对话历史（Backlog）记录（属于 Phase 4 REQ-ENG-075）
@@ -1380,7 +1689,7 @@ graph TD
 | MV03 | 长按不重复触发 | 在对话等待时长按鼠标左键 | 只触发一次推进（点击一次只推进一句），不连续跳过多句 |
 
 ---
-### PH1-T17 — 实现 InputManager — winit 事件→游戏动作映射
+### PH1-T20 — 实现 InputManager — winit 事件→游戏动作映射
 
 | 属性 | 内容 |
 |------|------|
@@ -1448,7 +1757,7 @@ graph TD
    - 不实现按键自定义绑定（属于 Phase 5 REQ-ENG-078）
    - 不实现 Skip 模式的实际逻辑（属于 Phase 4 REQ-ENG-073）
    - 不实现快速存档/读档功能（属于 Phase 2）
-   - 不处理窗口 resize 事件（属于 PH1-T18 主事件循环）
+   - 不处理窗口 resize 事件（属于 PH1-T21 主事件循环）
 
 #### 验收标准
 
@@ -1471,7 +1780,7 @@ graph TD
 | MV03 | 长按不重复 | 长按 Enter 键 2 秒 | 只推进一句对话，不连续跳过多句 |
 
 ---
-### PH1-T18 — 主事件循环 — 帧循环 update→render→present
+### PH1-T21 — 主事件循环 — 帧循环 update→render→present + App 项目入口
 
 | 属性 | 内容 |
 |------|------|
@@ -1479,16 +1788,16 @@ graph TD
 | **预估工时** | 8 小时 |
 | **对应需求** | 全部 REQ-ENG-010~014, REQ-ENG-020~023（运行时集成） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — EventLoop） |
-| **前置依赖** | PH1-T15（SceneManager）, PH1-T16（DialogueController）, PH1-T17（InputManager） |
+| **前置依赖** | PH1-T18（SceneManager）, PH1-T19（DialogueController）, PH1-T20（InputManager） |
 | **状态** | [ ] 未完成 |
 
 #### 任务说明
 
-1. **开发目标**：实现引擎的主事件循环——将 winit 事件循环、InputManager、SceneManager、DialogueController、Renderer 串联为一个完整的 60fps 帧循环。每帧执行 `process_input → update → render → present` 管线。处理窗口 resize、最小化/恢复、关闭等生命周期事件。
+1. **开发目标**：实现引擎的主事件循环——将 winit 事件循环、InputManager、SceneManager、DialogueController、Renderer 串联为一个完整的 60fps 帧循环。每帧执行 `process_input → update → render → present` 管线。处理窗口 resize、最小化/恢复、关闭等生命周期事件。**App 作为引擎主入口**，负责接收项目路径 → 加载项目 → 编译 → 初始化所有子系统 → 启动事件循环。
 
 2. **涉及文件/组件**（共 4 个）：
    - 新建：`engine/aster-runtime/src/event_loop.rs` — `EventLoop` 结构体：winit 事件循环 + 帧循环逻辑 + 各子系统调度
-   - 新建：`engine/aster-runtime/src/app.rs` — `App` 结构体（顶层入口）：持有 `GpuContext`、`SceneManager`、`InputManager`、`DialogueController`，对外提供 `run()` 方法
+   - 新建：`engine/aster-runtime/src/app.rs` — `App` 结构体（顶层入口）：持有 `GpuContext`、`SceneManager`、`InputManager`、`DialogueController`、`GameContext`，对外提供 `run()` 方法
    - 修改：`engine/aster-runtime/src/lib.rs` — 模块声明 + 公开导出 `App`（引擎主入口）
    - 修改：`engine/aster-runtime/Cargo.toml` — 确认所有依赖已添加（`aster-core`, `aster-parser`, `aster-compiler`, `aster-vm`, `aster-renderer`, `aster-platform`, `winit`, `wgpu`）
 
@@ -1497,6 +1806,7 @@ graph TD
      ```rust
      pub struct App {
          gpu_context: GpuContext,
+         project_context: GameContext,     // 游戏级上下文
          scene_manager: SceneManager,
          dialogue_controller: DialogueController,
          input_manager: InputManager,
@@ -1505,10 +1815,20 @@ graph TD
      }
      
      impl App {
-         pub fn new(config: AppConfig) -> Result<Self, RuntimeError>;
+         /// 从项目路径启动引擎
+         pub fn open(project_root: &Path) -> Result<Self, RuntimeError>;
+         /// 运行主事件循环（阻塞直到退出）
          pub fn run(&mut self);
      }
      ```
+   - **App::open() 启动流程**（Phase 1 新增项目加载管线）：
+     1. `GameLoader::load(project_root)` → `GameManifest`
+     2. `GameCompiler::compile(&manifest)` → `CompiledGame`
+     3. `GameContext::new(manifest, compiled)` → `GameContext`
+     4. 初始化 `GpuContext`（分辨率来自 `project.project.resolution`）
+     5. 初始化 `SceneManager::new(project_context)`
+     6. 加载入口场景：`scene_manager.load_scene(&project_context.entry_scene_id)`
+     7. 初始化 `InputManager`、`DialogueController`
    - **帧循环**（在 `winit::EventLoop::run()` 中）：
      ```rust
      // 每帧执行：
@@ -1542,9 +1862,9 @@ graph TD
    - 架构依据（Architecture.md §4.11）：事件循环和状态机
    - 已有接口：
      - PH1-T06 的 `GpuContext`（`render_frame()`、`present()`、`resize()`）
-     - PH1-T15 的 `SceneManager`（`load_scene()`、`update()`、`on_click()`）
-     - PH1-T16 的 `DialogueController`（`push()`、`update()`、`on_click()`）
-     - PH1-T17 的 `InputManager`（`process_event()`）
+     - PH1-T18 的 `SceneManager`（`load_scene()`、`update()`、`on_click()`）
+     - PH1-T19 的 `DialogueController`（`push()`、`update()`、`on_click()`）
+     - PH1-T20 的 `InputManager`（`process_event()`）
 
 5. **🚫 本任务不做什么**：
    - 不实现标题画面（Title Screen）（属于 Phase 5）
@@ -1582,16 +1902,16 @@ graph TD
 |----------|-------|------|
 | 依赖前置 | Phase 0 | 依赖 Phase 0 创建的 Cargo workspace 骨架、CI/CD 管线、CLAUDE.md 规范 |
 | 被依赖 | Phase 2 | Phase 2 依赖本 Phase 的全部 crate（`aster-platform`、`aster-core`、`aster-parser`、`aster-compiler`、`aster-vm`、`aster-renderer`、`aster-runtime`），在此基础上添加音频、资源缓存、存档功能 |
-| 被依赖 | Phase 3 | Phase 3 IDE 后端以库形式依赖 `aster-parser`、`aster-compiler`、`aster-core` |
+| 被依赖 | Phase 3 | Phase 3 IDE 后端以库形式依赖 `aster-parser`、`aster-compiler`、`aster-core`。`GameLoader`、`GameCompiler`、`GameContext` 提供的游戏级加载/编译能力可直接被 IDE "打开项目"和"构建项目"功能复用 |
 
 ---
 
 ## 📊 完成度追踪
 
-- **总任务数**：18
-- **已完成**：4（22%）
+- **总任务数**：21
+- **已完成**：5（24%）
 - **进行中**：0（0%）
-- **待开始**：14（78%）
+- **待开始**：16（76%）
 - **已废弃**：0（0%）
 
-> 最后更新：2026-06-13 19:00 — 由 Claude 自动维护
+> 最后更新：2026-06-13 — 由 Claude 自动维护。新增 PH1-T15~T17（游戏清单加载/项目编译/游戏上下文），原 T15~T18 顺延为 T18~T21。

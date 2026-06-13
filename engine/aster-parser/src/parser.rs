@@ -17,12 +17,16 @@
 //! 解析流程：
 //! ```text
 //! .aster 源码 → AsterParser::parse(Rule::script, source)
-//!             → Ok(pest::Pairs) 或 Err → pest Error → Vec<ParseError>
+//!             → Ok(pest::Pairs) → AstBuilder::build() → aster_core::Scene
+//!             → Err → pest Error → Vec<ParseError>
 //! ```
 
 use pest::Parser;
 use pest_derive::Parser;
 
+use aster_core::Scene;
+
+use crate::builder::AstBuilder;
 use crate::error::ParseError;
 
 /// pest 解析器 — 由 `grammar.pest` 文件在编译期自动生成。
@@ -36,16 +40,20 @@ use crate::error::ParseError;
 #[grammar = "grammar.pest"]
 pub struct AsterParser;
 
-/// 解析 .aster 脚本源码，返回 pest token 流。
+/// 解析 .aster 脚本源码，返回编译就绪的 `Scene` AST。
 ///
 /// 这是 parser 模块的唯一公共入口。
+///
+/// # 解析流程
+/// 1. pest 解析：.aster 源码 → pest token 流
+/// 2. AST 构建：pest token 流 → `aster_core::Scene`
 ///
 /// # 参数
 /// - `source`: .aster 脚本的完整源码文本（&str）
 ///
 /// # 返回值
-/// - `Ok(Pairs<Rule>)`: 解析成功，返回 token pair 树。
-///   - 即使输入为空文件（仅含空白/注释），也返回 Ok 而非错误
+/// - `Ok(Scene)`: 解析成功，返回可直接供编译器消费的完整 Scene AST。
+///   - 即使输入为空文件（仅含空白/注释），也返回 Ok（Scene 的 nodes 为空）
 /// - `Err(Vec<ParseError>)`: 解析失败，返回一个或多个结构化错误
 ///   - 每个错误携带行号、列号、中文描述和修复建议
 ///
@@ -61,7 +69,7 @@ pub struct AsterParser;
 /// }"#;
 ///
 /// match parse_script(source) {
-///     Ok(pairs) => println!("解析成功，共 {} 个顶层 token", pairs.len()),
+///     Ok(scene) => println!("解析成功，场景 '{}' 包含 {} 个节点", scene.id, scene.nodes.len()),
 ///     Err(errors) => {
 ///         for e in &errors {
 ///             eprintln!("{}", e);
@@ -69,14 +77,10 @@ pub struct AsterParser;
 ///     }
 /// }
 /// ```
-///
-/// # 当前阶段（PH1-T04）
-/// - 返回原始的 `pest::Pairs` token 流
-/// - PH1-T05 接入 AST 构建器后，将改为返回 `Result<aster_core::Scene, Vec<ParseError>>`
-pub fn parse_script(source: &str) -> Result<pest::iterators::Pairs<'_, Rule>, Vec<ParseError>> {
+pub fn parse_script(source: &str) -> Result<Scene, Vec<ParseError>> {
     // 空输入（仅含空白/注释）视为合法：不产生 token 对，但也不报错
     // pest 的 SOI ~ EOI 对纯空白输入会解析为空 token 流，这是预期行为
-    AsterParser::parse(Rule::script, source).map_err(|pest_error| {
+    let pairs = AsterParser::parse(Rule::script, source).map_err(|pest_error| {
         // 将单个 pest 错误转换为我们的 ParseError 格式
         // 注：pest 的 PEG 解析在遇到第一个语法错误时即停止，
         // 因此每次解析失败只产生一个 pest Error
@@ -93,7 +97,10 @@ pub fn parse_script(source: &str) -> Result<pest::iterators::Pairs<'_, Rule>, Ve
         let hint = generate_hint(&pest_error);
 
         vec![ParseError::new((line, col, 0), message, hint, context)]
-    })
+    })?;
+
+    // PH1-T05: 通过 AstBuilder 将 pest token 流转换为 Scene AST
+    AstBuilder::build(pairs, source)
 }
 
 /// 从源码中提取出错行的文本（用于错误展示的 context 字段）。

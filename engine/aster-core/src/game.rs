@@ -1,8 +1,8 @@
 //! Asterism — Galgame/ADV 游戏引擎
 //!
-//! 文件路径：engine/aster-core/src/project.rs
-//! 功能概述：项目元数据类型 — 定义 `Project` 结构体，对应 `project.toml` 的 `[project]` section。
-//!           包含项目名称、版本、入口场景、分辨率、默认设置等元数据。
+//! 文件路径：engine/aster-core/src/game.rs
+//! 功能概述：游戏元数据类型 — 定义 `Game` 结构体，对应 `aster.toml` 的 `[game]` section。
+//!           包含游戏名称、版本、入口场景、分辨率、默认设置等元数据。
 //!           所有类型均派生 `Debug + Clone + Serialize + Deserialize`。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-13
@@ -11,42 +11,42 @@
 //! 依赖模块：
 //! - serde（序列化/反序列化支持，用于 TOML/JSON 读写）
 //!
-//! 对应文档：Architecture.md §4.2（核心类型清单）、§5.2（project.toml 格式）
+//! 对应文档：Architecture.md §4.2（核心类型清单）、§5.2（aster.toml 格式）
 
 use serde::{Deserialize, Serialize};
 
-/// 游戏项目元数据 — 对应 `project.toml` 中的 `[project]` section。
+/// 游戏元数据 — 对应 `aster.toml` 中的 `[game]` section。
 ///
-/// 包含项目的基本信息（名称、版本）、入口场景、设计分辨率和默认设置。
+/// 包含游戏的基本信息（名称、版本）、入口场景、设计分辨率和默认设置。
 /// `characters` 和 `scenes` 列表由引擎运行时从 `characters/` 和 `scripts/`
-/// 目录自动扫描生成，不存储在 `Project` 结构体中。
+/// 目录自动扫描生成，不存储在 `Game` 结构体中。
 ///
 /// # 序列化
 ///
 /// 通过 serde 派生支持 TOML 序列化/反序列化：
 /// ```rust,no_run
-/// # use aster_core::Project;
+/// # use aster_core::Game;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let project: Project = toml::from_str(&std::fs::read_to_string("project.toml")?)?;
+/// let game: Game = toml::from_str(&std::fs::read_to_string("aster.toml")?)?;
 /// # Ok(())
 /// # }
 /// ```
 ///
 /// # 示例
 /// ```
-/// use aster_core::{Project, Resolution, ProjectSettings};
+/// use aster_core::{Game, Resolution, GameSettings};
 ///
-/// let project = Project {
+/// let game = Game {
 ///     name: "My First Visual Novel".into(),
 ///     version: "0.1.0".into(),
 ///     entry_scene: "prologue".into(),
 ///     resolution: Resolution { width: 1920, height: 1080 },
-///     settings: ProjectSettings::default(),
+///     settings: GameSettings::default(),
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Project {
-    /// 项目名称（显示在窗口标题和关于对话框中）
+pub struct Game {
+    /// 游戏名称（显示在窗口标题和关于对话框中）
     pub name: String,
 
     /// 语义化版本号（遵循 SemVer 2.0 规范）
@@ -60,9 +60,9 @@ pub struct Project {
     #[serde(default = "Resolution::default")]
     pub resolution: Resolution,
 
-    /// 项目全局默认设置（语言、文字速度、音量等）
-    #[serde(default = "ProjectSettings::default")]
-    pub settings: ProjectSettings,
+    /// 游戏全局默认设置（语言、文字速度、音量等）
+    #[serde(default = "GameSettings::default")]
+    pub settings: GameSettings,
 }
 
 /// 游戏设计分辨率 — 定义画布的逻辑像素尺寸。
@@ -99,12 +99,12 @@ const fn default_height() -> u32 {
     1080
 }
 
-/// 项目全局设置 — 对应 `project.toml` 中的 `[project.settings]` section。
+/// 游戏全局设置 — 对应 `aster.toml` 中的 `[game.settings]` section。
 ///
 /// 包含语言偏好、文字显示速度和默认音量等可配置项。
 /// 这些设置在游戏运行时可被玩家覆盖，此处定义的是首次启动时的默认值。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ProjectSettings {
+pub struct GameSettings {
     /// 默认语言（BCP 47 语言标签，如 `"zh-CN"`、`"en-US"`、`"ja-JP"`）
     /// 多语言支持将在 v1.0.0 完整实现
     #[serde(default = "default_language")]
@@ -127,7 +127,7 @@ pub struct ProjectSettings {
     pub default_voice_volume: f32,
 }
 
-impl Default for ProjectSettings {
+impl Default for GameSettings {
     fn default() -> Self {
         Self {
             language: default_language(),
@@ -161,7 +161,7 @@ const fn default_voice_volume() -> f32 {
 
 /// 文字显示速度 — 控制打字机效果中每个字符的显示间隔。
 ///
-/// 对应 `project.toml` 中 `text_speed` 字段。
+/// 对应 `aster.toml` 中 `text_speed` 字段。
 /// 预设四种速度档位（instant/slow/normal/fast），
 /// `Custom(f32)` 变体允许创作者指定任意 ms/char 速率（Phase 1+ 功能）。
 ///
@@ -262,13 +262,13 @@ impl<'de> Deserialize<'de> for TextSpeed {
 mod tests {
     use super::*;
 
-    /// AC01 — `Project` 结构体可正确序列化为 TOML 并反序列化回来
+    /// AC01 — `Game` 结构体可正确序列化为 TOML 并反序列化回来
     ///
-    /// 验证完整的 Project → TOML 字符串 → Project 的 round-trip，
-    /// 确保所有字段（包括嵌套结构 Resolution 和 ProjectSettings）序列化/反序列化一致。
+    /// 验证完整的 Game → TOML 字符串 → Game 的 round-trip，
+    /// 确保所有字段（包括嵌套结构 Resolution 和 GameSettings）序列化/反序列化一致。
     #[test]
-    fn ac01_project_toml_roundtrip() {
-        let project = Project {
+    fn ac01_game_toml_roundtrip() {
+        let game = Game {
             name: "Test Visual Novel".into(),
             version: "1.2.3".into(),
             entry_scene: "prologue".into(),
@@ -276,7 +276,7 @@ mod tests {
                 width: 1280,
                 height: 720,
             },
-            settings: ProjectSettings {
+            settings: GameSettings {
                 language: "ja-JP".into(),
                 text_speed: TextSpeed::Slow,
                 default_bgm_volume: 0.5,
@@ -286,45 +286,45 @@ mod tests {
         };
 
         // 序列化为 TOML
-        let toml_str = toml::to_string(&project).expect("序列化为 TOML 失败");
+        let toml_str = toml::to_string(&game).expect("序列化为 TOML 失败");
 
         // 验证 TOML 输出包含关键字段
         assert!(
             toml_str.contains("Test Visual Novel"),
-            "TOML 应包含项目名称"
+            "TOML 应包含游戏名称"
         );
         assert!(toml_str.contains("1.2.3"), "TOML 应包含版本号");
         assert!(toml_str.contains("prologue"), "TOML 应包含入口场景");
 
         // 反序列化回来
-        let restored: Project = toml::from_str(&toml_str).expect("从 TOML 反序列化失败");
+        let restored: Game = toml::from_str(&toml_str).expect("从 TOML 反序列化失败");
 
         // 断言 round-trip 一致
-        assert_eq!(restored.name, project.name);
-        assert_eq!(restored.version, project.version);
-        assert_eq!(restored.entry_scene, project.entry_scene);
-        assert_eq!(restored.resolution.width, project.resolution.width);
-        assert_eq!(restored.resolution.height, project.resolution.height);
-        assert_eq!(restored.settings.language, project.settings.language);
-        assert_eq!(restored.settings.text_speed, project.settings.text_speed);
+        assert_eq!(restored.name, game.name);
+        assert_eq!(restored.version, game.version);
+        assert_eq!(restored.entry_scene, game.entry_scene);
+        assert_eq!(restored.resolution.width, game.resolution.width);
+        assert_eq!(restored.resolution.height, game.resolution.height);
+        assert_eq!(restored.settings.language, game.settings.language);
+        assert_eq!(restored.settings.text_speed, game.settings.text_speed);
         assert_eq!(
             restored.settings.default_bgm_volume,
-            project.settings.default_bgm_volume
+            game.settings.default_bgm_volume
         );
         assert_eq!(
             restored.settings.default_se_volume,
-            project.settings.default_se_volume
+            game.settings.default_se_volume
         );
         assert_eq!(
             restored.settings.default_voice_volume,
-            project.settings.default_voice_volume
+            game.settings.default_voice_volume
         );
     }
 
     /// AC01 补充 — 验证 Default 实现产生合理的值
     #[test]
-    fn ac01_project_settings_default_values() {
-        let settings = ProjectSettings::default();
+    fn ac01_game_settings_default_values() {
+        let settings = GameSettings::default();
         assert_eq!(settings.language, "zh-CN");
         assert_eq!(settings.text_speed, TextSpeed::Normal);
         // 比较浮点数（允许误差）
@@ -343,7 +343,7 @@ mod tests {
 
     /// 验证 TextSpeed 在结构体中的 TOML 序列化/反序列化正确
     ///
-    /// TOML 不支持顶层枚举序列化，TextSpeed 始终作为 ProjectSettings
+    /// TOML 不支持顶层枚举序列化，TextSpeed 始终作为 GameSettings
     /// 或其他结构体的字段使用。本测试验证在实际使用场景中的 round-trip。
     #[test]
     fn text_speed_toml_roundtrip_in_struct() {
@@ -454,11 +454,11 @@ mod tests {
         assert!(result.is_err(), "null 不应反序列化为 TextSpeed");
     }
 
-    // ─── ProjectSettings 边界值 ──────────────────────────────────────────
+    // ─── GameSettings 边界值 ──────────────────────────────────────────
 
-    /// 验证 ProjectSettings 支持所有合法的 TextSpeed 变体。
+    /// 验证 GameSettings 支持所有合法的 TextSpeed 变体。
     #[test]
-    fn project_settings_all_text_speeds() {
+    fn game_settings_all_text_speeds() {
         #[derive(Debug, Serialize, Deserialize, PartialEq)]
         struct Wrapper {
             text_speed: TextSpeed,

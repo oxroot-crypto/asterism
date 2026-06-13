@@ -25,7 +25,7 @@ path = "src/main.rs"
 # 命令行参数解析 — derive 模式，声明式定义子命令和选项
 clap = { version = "4", features = ["derive"] }
 
-# 序列化 — 读取 project.toml 等 TOML 格式的项目配置文件
+# 序列化 — 读取 aster.toml 等 TOML 格式的配置文件
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 

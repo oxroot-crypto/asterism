@@ -641,14 +641,14 @@ graph TD
 1. **开发目标**：创建 IDE "新建项目"使用的默认项目模板，包含标准目录结构和示例 .aster 脚本。
 
 2. **涉及文件/组件**（共 5 个文件）：
-   - 新建：`templates/default_project/project.toml` — 项目元数据模板
+   - 新建：`templates/default_project/aster.toml` — 游戏元数据模板
    - 新建：`templates/default_project/scripts/prologue.aster` — 示例场景脚本
    - 新建：`templates/default_project/characters/heroine.asterchar` — 示例角色定义
    - 新建：`templates/default_project/build.toml` — 构建配置模板 (TOML)
    - 新建：`templates/default_project/.asterignore` — 构建排除规则
 
 3. **实现要点**：
-   - `project.toml`：名称 "My First Visual Novel"、分辨率 1920×1080、入口场景 "prologue"。字段对齐 Architecture `Project` 类型（name / version / resolution / entry_scene / settings）
+   - `aster.toml`：名称 "My First Visual Novel"、分辨率 1920×1080、入口场景 "prologue"。字段对齐 Architecture `Game` 类型（name / version / resolution / entry_scene / settings）
    - `prologue.aster`：微型完整场景，严格遵循 Architecture §2.3 语法示例（scene "id" / description / bg / music fade_in / show at/with / 角色名 "对话" / narration / menu "标题" / jump "目标"），含中文注释
    - `heroine.asterchar`：TOML 格式角色定义，严格遵循 Architecture §5.2 格式（id / name / display_color / sprites (扁平 key-value) / voice.prefix）
    - `build.toml`：TOML 格式构建配置，声明编译选项 / include / exclude / archive
@@ -671,7 +671,7 @@ graph TD
 | 编号 | 验收项 | 验证方式 | 预期结果 |
 |------|--------|----------|----------|
 | AC01 | 文件存在 | 逐一检查 | 5 个模板文件全部存在 |
-| AC02 | project.toml 格式 | TOML 解析器 | 解析成功 |
+| AC02 | aster.toml 格式 | TOML 解析器 | 解析成功 |
 | AC03 | .asterchar 格式 | TOML 解析器 | 含 character 段和 sprites 子段 |
 | AC04 | 目录结构 | 检查子目录 | `scripts/`、`characters/`、`assets/`、`gui/`、`fonts/` 均存在 |
 
@@ -689,14 +689,14 @@ graph TD
 - 实际工时：0.5 小时（预估 2 小时）
 
 - AI自验证结果：✅ AC01-AC04 全部通过（4/4）
-  - AC01: 5 个模板文件全部存在（project.toml / build.toml / prologue.aster / heroine.asterchar / .asterignore）
-  - AC02: project.toml TOML 解析成功，字段对齐 Architecture `Project` 类型
+  - AC01: 5 个模板文件全部存在（aster.toml / build.toml / prologue.aster / heroine.asterchar / .asterignore）
+  - AC02: aster.toml TOML 解析成功，字段对齐 Architecture `Game` 类型
   - AC03: heroine.asterchar TOML 解析成功，含 `[character]` 段和扁平 `sprites` 子段
   - AC04: 子目录 scripts/ characters/ assets/ gui/ fonts/ 均存在
 - 人工测试结果：⏳ 待验证（MV01-MV02）
 
 **上下文交接**：
-- 关键决策：`build.toml` 采用 TOML 格式而非原 `build.aster`（DSL 不适合做构建配置）；`project.toml` 对齐 Architecture `Project` 类型字段；`prologue.aster` 严格遵循 Architecture §2.3 语法示例；`heroine.asterchar` 采用扁平 sprites key-value 格式
+- 关键决策：`build.toml` 采用 TOML 格式而非原 `build.aster`（DSL 不适合做构建配置）；`aster.toml` 对齐 Architecture `Game` 类型字段；`prologue.aster` 严格遵循 Architecture §2.3 语法示例；`heroine.asterchar` 采用扁平 sprites key-value 格式
 - 新增文件：`templates/default_project/` 下 5 个文件 + 3 个 .gitkeep
 - 已知限制：`prologue.aster` 中的资源路径（bg / music / sprites）均为示意性占位，不含真实资源文件
 - 建议下一个任务先读取：`docs/Architecture.md` §2.3（DSL 语法）、§5.2（项目磁盘布局 + 文件格式）
