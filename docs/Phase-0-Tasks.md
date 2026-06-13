@@ -140,7 +140,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-12 23:00
 - 实际工时：1 小时（预估 2 小时）
-- 提交 Hash：N/A（项目尚未初始化 git 仓库）
+
 - AI自验证结果：✅ AC01-AC06 全部通过（6/6）
   - AC01: `cargo build --workspace` 11/11 编译通过
   - AC02: `cargo test --workspace` 11/11 占位测试通过
@@ -230,7 +230,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：3 小时（预估 4 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC07 全部通过（7/7）
   - AC01: `pnpm build` 构建成功（12 modules）
   - AC02: `pnpm typecheck` TypeScript strict 零错误
@@ -307,7 +307,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.5 小时（预估 2 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC05 全部通过（5/5）
   - AC01: `cargo build` 编译通过
   - AC02: `cargo run -- --help` 显示 3 个子命令
@@ -384,7 +384,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.5 小时（预估 4 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC04 全部通过（4/4）
   - AC01: YAML 语法校验通过
   - AC02: 3 平台矩阵（ubuntu/windows/macos）
@@ -454,7 +454,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.3 小时（预估 2 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC04 全部通过（4/4）
   - AC01: YAML 语法校验通过
   - AC02: 步骤完整：install → lint → typecheck → build → test → upload
@@ -524,7 +524,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.3 小时（预估 2 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC03 全部通过（3/3）
   - AC01: ci-rust.yml + ci-ide.yml 均含 `actions/upload-artifact@v4`
   - AC02: ci-release.yml 触发 `push: tags: ['v*']`
@@ -687,7 +687,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.5 小时（预估 2 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC04 全部通过（4/4）
   - AC01: 5 个模板文件全部存在（project.toml / build.toml / prologue.aster / heroine.asterchar / .asterignore）
   - AC02: project.toml TOML 解析成功，字段对齐 Architecture `Project` 类型
@@ -755,7 +755,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.3 小时（预估 1 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC02 全部通过（2/2）
   - AC01: bug_report.md + feature_request.md + config.yml 全部存在
   - AC02: 各模板含正确 YAML frontmatter（name / description / labels / body）
@@ -816,7 +816,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.2 小时（预估 0.5 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC02 全部通过（2/2）
   - AC01: pull_request_template.md 存在
   - AC02: 自检清单 10 项完整覆盖 CLAUDE.md §3.3
@@ -878,7 +878,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.3 小时（预估 2 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC02 全部通过（2/2）
   - AC01: `.cargo/config.toml` 存在，含增量编译及 sccache 配置文档
   - AC02: `ci-rust.yml` 含 `Swatinem/rust-cache@v2`
@@ -951,7 +951,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13
 - 实际工时：0.2 小时（预估 0.5 小时）
-- 提交 Hash：`2b06aaa`
+
 - AI自验证结果：✅ AC01-AC03 全部通过（3/3）
   - AC01: engine/Cargo.toml 含 `[profile.dev]`，`opt-level = 1`
   - AC02: engine/Cargo.toml 含 `[profile.release]`，`lto = "thin"` + `strip = "symbols"`

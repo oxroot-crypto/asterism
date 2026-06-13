@@ -14,7 +14,7 @@
 | 编号 | 任务名称 | 优先级 | 预估工时 | 依赖 | 状态 |
 |------|----------|--------|----------|------|------|
 | PH1-T01 | 实现 `aster-platform` — Platform trait + 3 平台实现 | P0 | 8h | 无 | [x] |
-| PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [ ] |
+| PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [x] |
 | PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [ ] |
 | PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 8h | 无 | [ ] |
 | PH1-T05 | 实现 `aster-parser` — AST 构建器与错误收集 | P0 | 8h | PH1-T02, PH1-T03, PH1-T04 | [ ] |
@@ -32,7 +32,7 @@
 | PH1-T17 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T18 | 主事件循环 — 帧循环 update→render→present | P0 | 8h | PH1-T15, PH1-T16, PH1-T17 | [ ] |
 
-**统计**：总计 18 个任务 | 已完成: 1 | 进行中: 0 | 待开始: 17
+**统计**：总计 18 个任务 | 已完成: 2 | 进行中: 0 | 待开始: 16
 
 ---
 
@@ -161,7 +161,7 @@ graph TD
 **完成记录**：
 - 完成时间：2026-06-13 12:00
 - 实际工时：3 小时
-- 提交 Hash：`9f9fa0b`
+
 - AI自验证结果：✅ AC01-AC05 全部通过（42 单元测试 + 3 doctest 全部通过）
 - 人工测试结果：✅ MV01-MV02 全部通过
 - 备注：PlatformError 使用 std::error::Error 手动实现（保持零外部依赖），非 thiserror 派生。剪贴板为 Phase 1 存根。Windows 语言检测使用注册表查询 reg.exe 回退方案。
@@ -182,7 +182,7 @@ graph TD
 | **对应需求** | REQ-ENG-003（变量与旗标系统的数据载体）, REQ-ENG-022（选择支数据结构） |
 | **对应架构模块** | `aster-core`（参考 Architecture.md §4.2） |
 | **前置依赖** | 无 |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -191,7 +191,7 @@ graph TD
 2. **涉及文件/组件**（共 5 个）：
    - 新建：`engine/aster-core/src/project.rs` — `Project` 结构体 + `ProjectSettings`（分辨率、默认音量等）
    - 新建：`engine/aster-core/src/character.rs` — `Character` 结构体（id, name, display_color, sprites 表情映射, voice_prefix）
-   - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（Dialogue / ShowChar / HideChar / Narration / Menu / Branch / SetVariable / PlaySE / Wait / Effect / Call / Return / Label）+ `Choice` 结构体
+   - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（25 变体：Bg / ShowChar / ShowSprite / MoveChar / Emotion / HideChar / HideSprite / Dialogue / Narration / Menu / Branch / SetVariable / SetFlag / UnsetFlag / ToggleFlag / Music / StopMusic / PlaySE / Wait / Effect / Jump / Goto / Call / Return / Label）+ `Choice` + `Position` + `TransitionSpec` 结构体
    - 修改：`engine/aster-core/src/lib.rs` — 添加 `mod project; mod character; mod scene;` + `pub use` 重导出所有公开类型
    - 修改：`engine/aster-core/Cargo.toml` — 确认 `serde` workspace 依赖已启用 `derive` feature
 
@@ -237,6 +237,22 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 编译验证 | 在终端执行 `cargo build --package aster-core` | 编译成功，无错误和 warning |
 | MV02 | 文档查看 | 执行 `cargo doc --package aster-core --open`（或查看生成的文档） | 所有公开类型有完整的中文 docstring，文档页面可正常浏览 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-13 15:30
+- 实际工时：5 小时
+
+- AI自验证结果：✅ AC01-AC05 全部通过（16/16 单元测试通过，0 clippy warning）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：实际交付超越原始任务范围（25 变体 vs 原计划 14 变体），新增 Bg / ShowSprite / MoveChar / Emotion / HideSprite / ToggleFlag / Music / StopMusic / Goto / Jump（语义收窄为场景内）变体。Jump 改为仅场景内 Label 跳转，Goto 负责跨场景跳转。TextSpeed 新增 Custom(f32) 变体。Architecture.md / Phase-1-Tasks.md / lib.rs 注释均已同步更新。
+
+**上下文交接**：
+- 关键决策：SceneNode 从 Architecture.md 原定 13 变体扩展到 25 变体，完整覆盖 Phase 1-5 的渲染/动画/音频/控制流需求；Jump 收窄为场景内跳转，跨场景由 Goto 独立承担；所有新增变体均派生 Debug+Clone+Serialize+Deserialize+PartialEq
+- 新增接口：`SceneNode::{Bg, ShowSprite, MoveChar, Emotion, HideSprite, ToggleFlag, Music, StopMusic, Goto}` — 各 1-7 字段；`TextSpeed::Custom(f32)` — 自定义 ms/char 速率；`Position::to_coords()` — 归一化坐标转换
+- 新增数据表：无（纯类型定义，无持久化）
+- 已知限制：Video 变体留给 Phase 5；Effect 不应用于视频播放（语义不同）；ShowSprite 目前用 asset_path 标识（非唯一 ID），同一资源多次显示时 HideSprite 行为未精确定义
+- 建议下一个任务先读取：`engine/aster-core/src/scene.rs`（SceneNode 完整定义），`engine/aster-core/src/project.rs`（TextSpeed 自定义 serde 实现模式），`docs/Architecture.md` §4.2（更新后的类型表）
 
 ---
 ### PH1-T03 — 实现 `aster-core` 资源与变量类型

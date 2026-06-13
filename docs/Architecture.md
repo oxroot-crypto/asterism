@@ -406,7 +406,7 @@ pub trait Platform: Send + Sync {
 | `Project` | 游戏项目元数据 | name, version, resolution, entry_scene, characters, scenes, settings |
 | `Character` | 角色定义 | id, name, display_color, sprites: Map<Emotion, AssetId>, voice_prefix |
 | `Scene` | 场景定义 | id, label, background, music, nodes: Vec<SceneNode> |
-| `SceneNode` | 场景节点枚举 | Dialogue / ShowChar / HideChar / Narration / Menu / Branch / SetVariable / PlaySE / Wait / Effect / Call / Return / Label |
+| `SceneNode` | 场景节点枚举（25 变体） | Bg / ShowChar / ShowSprite / MoveChar / Emotion / HideChar / HideSprite / Dialogue / Narration / Menu / Branch / SetVariable / SetFlag / UnsetFlag / ToggleFlag / Music / StopMusic / PlaySE / Wait / Effect / Jump / Goto / Call / Return / Label |
 | `AssetId` | 资源标识符 | newtype u64，按类型分段分配 |
 | `Asset` | 资源元数据 | id, asset_type: AssetType, path, metadata |
 | `AssetType` | 资源类型枚举 | Background / CharacterSprite / Bgm / Se / Voice / Font / Video / GuiElement |
@@ -786,7 +786,7 @@ erDiagram
     }
 
     SceneNode {
-        enum type "Dialogue|ShowChar|HideChar|Narration|Menu|Branch|SetVariable|PlaySE|Wait|Effect|Call|Label"
+        enum type "Bg|ShowChar|ShowSprite|MoveChar|Emotion|HideChar|HideSprite|Dialogue|Narration|Menu|Branch|SetVariable|SetFlag|UnsetFlag|ToggleFlag|Music|StopMusic|PlaySE|Wait|Effect|Jump|Goto|Call|Return|Label"
         json properties
     }
 
