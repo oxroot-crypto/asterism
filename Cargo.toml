@@ -39,6 +39,12 @@ authors = ["Asterism Contributors"]
 serde = { version = "1", features = ["derive"] }
 aster-core = { path = "engine/aster-core" }
 
+# 渲染器依赖 — Phase 1 引入
+thiserror = "2"
+wgpu = "24.0.5"
+winit = "0.30.13"
+pollster = "0.4"
+
 # ============================================================
 # 编译配置文件
 # ============================================================

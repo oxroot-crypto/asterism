@@ -6,4 +6,7 @@ license.workspace = true
 description = "渲染器 — GPU 渲染管线，负责精灵批处理/转场特效/文本渲染"
 
 [dependencies]
-# Phase 2 将添加 wgpu、aster-core、aster-asset（workspace 内部依赖）
+thiserror = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }

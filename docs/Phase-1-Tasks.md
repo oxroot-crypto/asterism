@@ -18,7 +18,7 @@
 | PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [x] |
 | PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 6h | PH1-T02（依赖 aster-core 类型） | [x] |
 | PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [x] |
-| PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [ ] |
+| PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [x] |
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [ ] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 5 | 进行中: 0 | 待开始: 16
+**统计**：总计 21 个任务 | 已完成: 6 | 进行中: 0 | 待开始: 15
 
 ---
 
@@ -545,7 +545,7 @@ graph TD
 | **对应需求** | REQ-ENG-010（窗口与表面创建） |
 | **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `GpuContext` 组件） |
 | **前置依赖** | 无（wgpu/winit 为外部依赖，不依赖其他 engine crate） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -601,6 +601,21 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 窗口创建和清屏 | 运行渲染器测试程序（或临时 example），观察是否弹出窗口并显示纯色背景 | 弹出一个窗口，标题为 "Asterism"，显示配置的纯色（如红色），窗口尺寸为 1920×1080 |
 | MV02 | 窗口 resize | 手动拖拽窗口边缘改变大小，观察窗口内容是否随窗口缩放 | 窗口内容不拉伸变形（保持宽高比），无闪烁和崩溃 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-13 23:30
+- 实际工时：3 小时
+- AI自验证结果：✅ AC01-AC03 全部通过（15/15 测试通过）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：wgpu 版本从 Architecture.md 原定 23.x 升级至 24.0.5（29.x 存在 `gpu-allocator` 的 `windows` crate 版本冲突）。使用 thiserror 派生 RenderError。支持 headless 模式用于 CI 测试。
+
+**上下文交接**：
+- 关键决策：`GpuContext` 支持双模式（窗口/headless），surface/window 用 `Option` 表示；`new()` 接受 `Arc<Window>` 而非 `&EventLoop`，保持 GpuContext 的 `Send + Sync`；`acquire_frame()` 返回拥有型 `Frame`，`present()` 消费 Frame
+- 新增接口：`GpuContext::new(Arc<Window>, &RenderConfig) -> Result<Self>` / `new_headless(&RenderConfig) -> Result<Self>` / `device()` / `queue()` / `instance()` / `adapter()` / `surface_config()` / `window()` / `clear_color()` / `resize(u32, u32)` / `acquire_frame() -> Result<Frame>` / `present(Frame)` / `clear_screen(Frame)`
+- 新增类型：`RenderConfig { width, height, fullscreen, vsync, msaa_samples, clear_color }` + `Default` / `Frame { texture, view, encoder }` / `RenderError` 枚举（7 变体 + thiserror）
+- 已知限制：AC04（清屏验证）需真实 GPU，标记 `#[ignore]`；wgpu 24.0.5 不支持 noop 后端（noop 需 v25+），CI headless 测试依赖软件渲染器；全屏切换未实现（config 预留字段）
+- 建议下一个任务先读取：`engine/aster-renderer/src/gpu_context.rs`（GpuContext 完整 API），`engine/aster-renderer/src/config.rs`（RenderConfig）
 
 ---
 ### PH1-T07 — 背景图层渲染
