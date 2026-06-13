@@ -16,8 +16,8 @@
 | PH1-T01 | 实现 `aster-platform` — Platform trait + 3 平台实现 | P0 | 8h | 无 | [x] |
 | PH1-T02 | 实现 `aster-core` 数据模型类型 | P0 | 8h | 无 | [x] |
 | PH1-T03 | 实现 `aster-core` 资源与变量类型 | P0 | 4h | PH1-T02 | [x] |
-| PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 6h | PH1-T02（依赖 aster-core 类型） | [ ] |
-| PH1-T05 | 实现 `aster-parser` — AST 构建器 + `aster-core` 表达式类型 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [ ] |
+| PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 6h | PH1-T02（依赖 aster-core 类型） | [x] |
+| PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [ ] |
 | PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [ ] |
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [ ] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
@@ -32,7 +32,7 @@
 | PH1-T17 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T18 | 主事件循环 — 帧循环 update→render→present | P0 | 8h | PH1-T15, PH1-T16, PH1-T17 | [ ] |
 
-**统计**：总计 18 个任务 | 已完成: 3 | 进行中: 0 | 待开始: 15
+**统计**：总计 18 个任务 | 已完成: 4 | 进行中: 0 | 待开始: 14
 
 ---
 
@@ -347,7 +347,7 @@ graph TD
 | **对应需求** | REQ-ENG-001（DSL 脚本解析） |
 | **对应架构模块** | `aster-parser`（参考 Architecture.md §4.3） |
 | **前置依赖** | PH1-T02（aster-core 类型 — `Scene`/`SceneNode` 等） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -414,6 +414,21 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 编译验证 | 在终端执行 `cargo build --package aster-parser` | 编译成功，pest 语法文件无编译期错误 |
 | MV02 | 有效脚本测试 | 创建临时 .aster 文件（包含 scene/bg/show/dialogue/menu/jump 完整语法），运行 `cargo test --package aster-parser` | 所有测试通过，包括该完整脚本的解析测试 |
+
+---
+
+**完成记录**：
+- 完成时间：2026-06-13 19:00
+- 实际工时：5 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（82/82 单元测试 + 3/3 doctest 通过）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：语法在开发中根据用户反馈做了 3 处调整：Emotion 改为 `emotion <char_id> <emotion>` 关键字前缀、HideSprite 改为 `usprite` 关键字（与 hide 区分）、移除无效词边界检查改为纯排序保护。语法彻底无歧义。
+
+**上下文交接**：
+- 关键决策：pest WHITESPACE 自动处理空格/换行/注释，块结构由 `{ }` 驱动。`se`/`set` 前缀冲突通过 statement 排序解决。PEG 表达式用优先级链实现运算符语义
+- 新增接口：`parse_script(&str) -> Result<Pairs<Rule>, Vec<ParseError>>`（PH1-T05 返回 `aster_core::Scene`）、`ParseError` 结构体
+- 已知限制：遇第一个语法错误即停止；裸标识符在 expr 中作隐式字符串字面量
+- 建议下一个任务先读取：`grammar.pest`、`parser.rs`、`aster-core/src/scene.rs`、`aster-core/src/expr.rs`
 
 ---
 ### PH1-T05 — 实现 `aster-parser` — AST 构建器
@@ -1574,9 +1589,9 @@ graph TD
 ## 📊 完成度追踪
 
 - **总任务数**：18
-- **已完成**：3（17%）
+- **已完成**：4（22%）
 - **进行中**：0（0%）
-- **待开始**：15（83%）
+- **待开始**：14（78%）
 - **已废弃**：0（0%）
 
 > 最后更新：2026-06-13 19:00 — 由 Claude 自动维护

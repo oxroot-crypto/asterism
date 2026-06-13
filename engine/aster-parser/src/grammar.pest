@@ -1,0 +1,494 @@
+// aster.pest — .aster DSL 的 PEG（Parsing Expression Grammar）语法定义
+//
+// 文件路径：engine/aster-parser/src/grammar.pest
+// 功能概述：定义 .aster 游戏脚本 DSL 的完整 PEG 语法规则，覆盖 SceneNode 全部
+//           25 种变体 + Expr 7 种 AST 节点 + BinaryOp 12 种 + UnaryOp 2 种运算符。
+//           由 pest 解析器生成器在编译期处理（`#[derive(Parser)]`），
+//           产出的 token 流供 PH1-T05 的 AstBuilder 消费并构建 aster_core::Scene。
+// 作者：Claude (AI)
+// 创建日期：2026-06-13
+// 最后修改：2026-06-13
+//
+// 对应文档：Architecture.md §4.3（aster-parser 模块）、§2.3（DSL 语法规范）
+//           任务：PH1-T04 — 实现 aster-parser PEG 语法定义与解析器框架
+//
+// 语法约定：
+//  - 缩进 2 空格（约定，非语义）
+//  - 注释以 -- 开头到行尾
+//  - 字符串以双引号包裹，支持 \" 转义
+//  - 变量以 $ 为前缀，旗标以 % 为前缀
+//  - 块结构使用 { }（非缩进驱动）
+//
+// 语法文件组织：
+//  §0  词法规则（空白、注释、字面量、标识符、变量/旗标引用）
+//  §1  表达式体系（运算符优先级：or < and < 比较 < 加减 < 乘除 < 一元 < 基本）
+//  §2  位置与转场
+//  §3  场景顶层结构
+//  §4  语句（25 种 SceneNode 变体对应规则）
+//  §5  顶层入口（script → scene_block*）
+
+
+// ====================================================================
+// §0  词法规则 — 空白、注释、字面量、标识符、变量/旗标引用
+// ====================================================================
+
+/// 空白字符：空格、制表符、换行符、注释
+/// 使用 _ 修饰符使其成为静默规则（不产生 token pair），
+/// 自动在所有规则之间插入匹配。
+WHITESPACE = _{
+    " "
+    | "\t"
+    | NEWLINE
+    | comment
+}
+
+/// 注释：-- 前缀到行尾（不含换行符），单行形式
+comment = @{
+    "--" ~ (!"\n" ~ ANY)*
+}
+
+/// 字符串字面量：双引号包裹，支持 \" 转义
+/// 使用 @ 修饰符——静默内部空白对应的 pair 拆分
+string_literal = @{
+    "\"" ~ (escape_char | (!"\"" ~ !"\n" ~ ANY))* ~ "\""
+}
+
+/// 转义字符：反斜杠 + 任意字符
+escape_char = @{ "\\" ~ ANY }
+
+/// 整数字面量：一个或多个十进制数字
+int_literal = @{ ASCII_DIGIT+ }
+
+/// 浮点数字面量：整数部分 . 小数部分
+/// 注：不支持科学记数法（v1.0 不需要）
+float_literal = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+
+/// 布尔字面量
+bool_literal = @{ "true" | "false" }
+
+/// 标识符：字母/下划线/中文字符开头，字母/数字/下划线/中文字符后续
+/// CJK_CHAR 覆盖：中文汉字、日文假名（平假名+片假名）、韩文
+identifier = @{
+    (ASCII_ALPHA | "_" | CJK_CHAR) ~ (ASCII_ALPHANUMERIC | "_" | CJK_CHAR)*
+}
+
+/// CJK 统一汉字 + 日文假名 + 韩文音节
+CJK_CHAR = _{
+    '\u{4e00}'..'\u{9fff}'   // 中文汉字（基本区）
+    | '\u{3040}'..'\u{309f}'  // 日文平假名
+    | '\u{30a0}'..'\u{30ff}'  // 日文片假名
+    | '\u{ac00}'..'\u{d7af}'  // 韩文音节
+}
+
+/// 变量引用：$前缀 + 标识符
+/// 例：$score、$affection_sayori、$player_name
+variable_ref = @{ "$" ~ identifier }
+
+/// 旗标引用：%前缀 + 标识符
+/// 例：%met_akane、%perfect_clear、%seen_sakura_tree
+flag_ref = @{ "%" ~ identifier }
+
+
+// ====================================================================
+// §1  表达式体系 — 运算符优先级链
+// ====================================================================
+//
+// 优先级（从低到高）：
+//   or → and → ==/!= → </>/<=/>= → +/- → *// → not/- → primary
+//
+// 每一层将上一层的结果作为操作数，
+// 通过 (~ operator ~ operand)* 实现左结合。
+// 由于 PEG 的贪婪匹配特性，这种链式设计自动
+// 满足左结合语义，无需显式处理左递归。
+
+/// 表达式入口 — 逻辑或优先级（最低）
+expr = { expr_or }
+
+/// 逻辑或：or 运算符
+expr_or = { expr_and ~ ("or" ~ expr_and)* }
+
+/// 逻辑与：and 运算符
+expr_and = { expr_compare ~ ("and" ~ expr_compare)* }
+
+/// 比较表达式：== != < > <= >=
+expr_compare = { expr_add ~ (compare_op ~ expr_add)* }
+compare_op = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+
+/// 加法表达式：+ -
+expr_add = { expr_mul ~ (add_op ~ expr_mul)* }
+add_op = { "+" | "-" }
+
+/// 乘法表达式：* /
+expr_mul = { unary ~ (mul_op ~ unary)* }
+mul_op = { "*" | "/" }
+
+/// 一元表达式：not（逻辑非）、-（算术取负）
+/// 支持多次一元操作如 `not not %flag`（虽然罕见）
+unary = { unary_op* ~ primary }
+unary_op = { "not" | "-" }
+
+/// 基本表达式 — 原子值
+primary = _{
+      float_literal
+    | int_literal
+    | bool_literal
+    | string_literal
+    | variable_ref
+    | flag_ref
+    | "(" ~ expr ~ ")"
+    | identifier                  // 裸标识符 → 隐式字符串字面量
+}
+
+
+// ====================================================================
+// §2  位置与转场
+// ====================================================================
+
+/// 立绘舞台位置
+/// 预设位置：left / center / right
+/// 自定义坐标：(expr, expr)，x 和 y 均为归一化坐标（0.0~1.0）
+position = {
+    preset_position
+    | custom_position
+}
+
+preset_position = { "left" | "center" | "right" }
+
+custom_position = { "(" ~ expr ~ "," ~ expr ~ ")" }
+
+/// 转场效果规格
+/// 三种类型：fade(ms) / dissolve(ms) / slide(dir, ms)
+transition = {
+    fade_transition
+    | dissolve_transition
+    | slide_transition
+}
+
+fade_transition = { "fade" ~ "(" ~ expr ~ ")" }
+dissolve_transition = { "dissolve" ~ "(" ~ expr ~ ")" }
+slide_transition = { "slide" ~ "(" ~ slide_direction ~ "," ~ expr ~ ")" }
+slide_direction = { "left" | "right" | "up" | "down" }
+
+
+// ====================================================================
+// §3  场景顶层结构
+// ====================================================================
+
+/// 顶层脚本入口 — 一个或多个场景块
+/// SOI（Start of Input）和 EOI（End of Input）确保解析完整输入
+script = {
+    SOI
+    ~ scene_block*
+    ~ EOI
+}
+
+/// 场景块：`scene "id" { body }`
+/// 例：`scene "prologue" { ... }`
+scene_block = {
+    "scene" ~ string_literal ~ "{" ~ scene_body ~ "}"
+}
+
+/// 场景体：可选的 description 行 + 零或多个语句
+scene_body = {
+    description_line?
+    ~ statement*
+}
+
+/// 描述行：`description: "场景的简短描述"`
+description_line = {
+    "description" ~ ":" ~ string_literal
+}
+
+
+// ====================================================================
+// §4  语句 — 25 种 SceneNode 变体对应规则
+// ====================================================================
+//
+// 语句排序注意事项（pest 使用有序选择）：
+//   - narration_stmt 在 dialogue_stmt 之前（narration 是关键字，不应被当作说话者）
+//   - show_char_stmt 在 emotion_stmt 之前（有 at 的 show 比 emotion 更优先）
+//   - set_flag_stmt / unset_flag_stmt / toggle_flag_stmt 在 se_stmt 之前（"se" 是 "set" 的前缀）
+
+statement = _{
+    // ── 状态类（旗标操作 — 必须在 se_stmt 之前，防止 "se" 匹配 "set" 的前缀）──
+      set_flag_stmt            // `set %flag`
+    | unset_flag_stmt          // `unset %flag`
+    | toggle_flag_stmt         // `toggle %flag`
+    // ── 媒体类 ──
+    | music_stmt
+    | stop_music_stmt
+    | se_stmt                  // `se <path>` — 必须在 set_flag_stmt 之后（"se" 是 "set" 的前缀）
+    // ── 渲染类 ──
+    | bg_stmt
+    | show_char_stmt           // `show <char> at <pos>` — 必须在 emotion_stmt 前
+    | emotion_stmt             // `emotion <char> <expr>`
+    | sprite_stmt              // `sprite <path> at (x, y)`
+    | move_char_stmt           // `move <char> to <pos>`
+    | hide_sprite_stmt         // `usprite <path>`
+    | hide_char_stmt           // `hide <char>`
+    | narration_stmt           // `narration <text>` — 必须在 dialogue_stmt 前
+    // ── 交互类 ──
+    | menu_stmt                // `menu <prompt> { choices }`
+    // ── 控制流类 ──
+    | branch_stmt              // if/elif/else
+    | jump_stmt                // `jump <label>` 场景内
+    | goto_stmt                // `goto <scene>` 跨场景
+    | call_stmt                // `call <label>`
+    | return_stmt              // `return`
+    | label_stmt               // `label <name>`
+    // ── 状态类 ──
+    | assignment_stmt          // `$var = expr`
+    // ── 媒体类（续）─
+    | effect_stmt              // `effect "type" params`
+    // ── 时序类 ──
+    | wait_stmt                // `wait <ms>`
+    // ── 对话（必须放最后，因为 speaker 是裸标识符，容易误匹配）─
+    | dialogue_stmt            // `<speaker> <text>`
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.1  背景切换 — SceneNode::Bg
+// ────────────────────────────────────────────────────────────────────
+
+/// 设置/切换背景：`bg <path> [with <trans>]`
+/// 例：`bg "bg_classroom_morning"`
+///     `bg $current_bg`
+///     `bg "bg_sakura_road_afternoon" with fade($fade_speed * 1000)`
+bg_stmt = {
+    "bg" ~ expr ~ ("with" ~ transition)?
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.2  音乐播放/停止 — SceneNode::Music / StopMusic
+// ────────────────────────────────────────────────────────────────────
+
+/// 播放/切换背景音乐：`music <path> [fade_in: <s>] [looping: <bool>]`
+/// 例：`music "bgm_daily_life"`
+///     `music $current_bgm fade_in: $fade_speed`
+///     `music "bgm_title_theme" fade_in: 1.0 looping: false`
+music_stmt = {
+    "music" ~ expr
+    ~ ("fade_in" ~ ":" ~ expr)?
+    ~ ("looping" ~ ":" ~ bool_literal)?
+}
+
+/// 停止背景音乐：`stop_music [fade_out: <s>]`
+/// 例：`stop_music`
+///     `stop_music fade_out: 1.5`
+stop_music_stmt = {
+    "stop_music" ~ ("fade_out" ~ ":" ~ expr)?
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.3  音效 — SceneNode::PlaySE
+// ────────────────────────────────────────────────────────────────────
+
+/// 播放音效：`se <path> [fade_in: <s>]`
+/// 例：`se "se_birds_chirping"`
+///     `se $se_ambient fade_in: 0.5`
+/// set_flag_stmt / unset_flag_stmt / toggle_flag_stmt 在 statement 排序中位于本规则之前，
+/// 因此 `set %flag` 不会被误匹配为 se_stmt（"set" 不会回退到 "se" + expr）。
+se_stmt = {
+    "se" ~ expr ~ ("fade_in" ~ ":" ~ expr)?
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.4  角色显示/表情/移动/隐藏 — ShowChar / Emotion / MoveChar / HideChar
+// ────────────────────────────────────────────────────────────────────
+
+/// 显示角色立绘：`show <char> at <pos> [emotion: <e>] [with <trans>]`
+/// 例：`show sayori at center with fade(0.8)`
+///     `show $char_friend at right emotion: $emo_happy with dissolve(0.5)`
+show_char_stmt = {
+    "show" ~ expr ~ "at" ~ position
+    ~ ("emotion" ~ ":" ~ expr)?
+    ~ ("with" ~ transition)?
+}
+
+/// 切换角色表情：`emotion <char_id> <emotion> [with <trans>]`
+/// 以 `emotion` 关键字开头，与 `show`/`move` 明确区分。
+/// char_id 和 emotion 均为表达式（支持字面量、变量引用）。
+/// 例：`emotion sayori "smile"`
+///     `emotion $char_friend "laugh" with dissolve(0.2)`
+///     `emotion $char_friend $emo_var`
+emotion_stmt = {
+    "emotion" ~ expr ~ expr
+    ~ ("with" ~ transition)?
+}
+
+/// 移动角色：`move <char> to <pos> [emotion: <e>] with <trans>`
+/// 与 ShowChar 的区别：使用 move 关键字，transition 为必填
+/// 例：`move sayori to left with slide(left, 0.8)`
+///     `move $char_friend to center emotion: "embarrassed" with slide(right, 0.5)`
+move_char_stmt = {
+    "move" ~ expr ~ "to" ~ position
+    ~ ("emotion" ~ ":" ~ expr)?
+    ~ "with" ~ transition
+}
+
+/// 隐藏角色立绘：`hide <char> [with <trans>]`
+/// 例：`hide akane`
+///     `hide $char_heroine with fade($base_delay)`
+hide_char_stmt = {
+    "hide" ~ expr ~ ("with" ~ transition)?
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.5  独立精灵 — ShowSprite / HideSprite
+// ────────────────────────────────────────────────────────────────────
+
+/// 显示独立精灵：`sprite <path> at (x, y) [scale: s] [alpha: a] [with <trans>]`
+/// 例：`sprite "ui/icon_heart.png" at (0.9, 0.05)`
+///     `sprite $icon_star at (0.1, 0.1) scale: 0.5 alpha: 0.7`
+///     `sprite "path" at (0.5, 0.5) alpha: $a / 10 with fade(1.0)`
+sprite_stmt = {
+    "sprite" ~ expr ~ "at" ~ custom_position
+    ~ ("scale" ~ ":" ~ expr)?
+    ~ ("alpha" ~ ":" ~ expr)?
+    ~ ("with" ~ transition)?
+}
+
+/// 隐藏独立精灵：`usprite <path> [with <trans>]`
+/// 例：`usprite "ui/icon_heart.png"`
+///     `usprite $icon_star with fade($base_delay * 0.5)`
+hide_sprite_stmt = {
+    "usprite" ~ expr ~ ("with" ~ transition)?
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.6  对话与旁白 — Dialogue / Narration
+// ────────────────────────────────────────────────────────────────────
+
+/// 角色对话：`<speaker> <text> [voice: <id>]`
+/// speaker 为裸标识符（角色 ID），text 为表达式（支持字符串拼接/变量插值）
+/// 例：`sayori "今天天气真好啊。"`
+///     `akane "我是" + $char_friend + "！好感度当前为 " + $affection_akane + " 点。"`
+///     `sayori "语音测试。" voice: $voice_id`
+dialogue_stmt = {
+    identifier ~ expr ~ ("voice" ~ ":" ~ expr)?
+}
+
+/// 旁白：`narration <text>`
+/// 与 Dialogue 的区别：无 speaker 字段，使用 narration 关键字
+/// 例：`narration "那是樱花盛开的四月。"`
+///     `narration $greeting + "，欢迎回来。"`
+narration_stmt = {
+    "narration" ~ expr
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.7  菜单/选择支 — Menu
+// ────────────────────────────────────────────────────────────────────
+
+/// 菜单：`menu <prompt> { choice* }`
+/// 例：`menu "要去哪里，" + $player_name + "？" { ... }`
+menu_stmt = {
+    "menu" ~ expr ~ "{" ~ choice_block* ~ "}"
+}
+
+/// 选项块：`text [if condition] { commands }`
+/// 支持条件选项（condition 为表达式，运行时求值）
+/// 例：`"樱花大道" { goto "chapter1/sakura_road" }`
+///     `"高好感度限定" if $affection_sayori >= 5 { ... }`
+choice_block = {
+    expr ~ ("if" ~ expr)? ~ "{" ~ statement* ~ "}"
+}
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.8  条件分支 — Branch
+// ────────────────────────────────────────────────────────────────────
+
+/// 条件分支：`if <cond> { ... } [elif <cond> { ... }]* [else { ... }]`
+/// 例：`if $score >= 100 { narration "完美！" } elif $score > 50 { narration "不错。" } else { narration "加油。" }`
+branch_stmt = {
+    "if" ~ expr ~ "{" ~ statement* ~ "}"
+    ~ elif_branch*
+    ~ else_branch?
+}
+
+elif_branch = { "elif" ~ expr ~ "{" ~ statement* ~ "}" }
+else_branch = { "else" ~ "{" ~ statement* ~ "}" }
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.9  控制流 — Jump / Goto / Call / Return / Label
+// ────────────────────────────────────────────────────────────────────
+
+/// 场景内跳转：`jump <target>`
+/// target 为标签名（表达式，支持 computed jump：`jump $next_label`）
+/// 例：`jump "menu_demo"`
+jump_stmt = { "jump" ~ expr }
+
+/// 跨场景跳转：`goto <scene_id> [label: <label>]`
+/// scene_id / label 均为表达式
+/// 例：`goto "chapter1/sakura_road"`
+///     `goto "chapter1/sakura_road" label: "main_flow"`
+///     `goto $next_scene label: $next_label`
+goto_stmt = { "goto" ~ expr ~ ("label" ~ ":" ~ expr)? }
+
+/// 子例程调用：`call <target>`
+/// 例：`call "flashback_subroutine"`
+call_stmt = { "call" ~ expr }
+
+/// 子例程返回：`return`（无参数）
+return_stmt = { "return" }
+
+/// 标签定义：`label <name>`
+/// name 可为字符串字面量或裸标识符
+/// 例：`label "branch_demo"`
+///     `label branch_demo`
+label_stmt = { "label" ~ (string_literal | identifier) }
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.10 变量与旗标 — SetVariable / SetFlag / UnsetFlag / ToggleFlag
+// ────────────────────────────────────────────────────────────────────
+
+/// 变量赋值：`$var = expr`
+/// 例：`$score = 0`
+///     `$score = $score + 10`
+///     `$is_high = $affection_sayori >= 5`
+assignment_stmt = {
+    variable_ref ~ "=" ~ expr
+}
+
+/// 设置旗标：`set %flag`
+/// 例：`set %met_akane`
+set_flag_stmt = { "set" ~ flag_ref }
+
+/// 清除旗标：`unset %flag`
+/// 例：`unset %bad_end_warning`
+unset_flag_stmt = { "unset" ~ flag_ref }
+
+/// 翻转旗标：`toggle %flag`
+/// 例：`toggle %auto_mode`
+toggle_flag_stmt = { "toggle" ~ flag_ref }
+
+
+// ────────────────────────────────────────────────────────────────────
+// §4.11 特效与等待 — Effect / Wait
+// ────────────────────────────────────────────────────────────────────
+
+/// 屏幕特效：`effect "type" [param: value]*`
+/// 例：`effect "shake" intensity: 0.8 duration: $base_delay`
+///     `effect "flash" color: "#FFFFFF" duration: $base_delay * 0.6`
+effect_stmt = {
+    "effect" ~ string_literal ~ effect_param*
+}
+
+/// 特效参数：`name: expr`
+effect_param = { identifier ~ ":" ~ expr }
+
+/// 等待：`wait <ms>`
+/// duration_ms 为表达式（支持字面量/变量/算术）
+/// 例：`wait 800`
+///     `wait $base_delay * 3`
+wait_stmt = { "wait" ~ expr }

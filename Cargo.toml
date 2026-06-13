@@ -37,6 +37,7 @@ authors = ["Asterism Contributors"]
 # 统一依赖版本管理 — 所有 crate 通过 workspace = true 引用
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
+aster-core = { path = "engine/aster-core" }
 
 # ============================================================
 # 编译配置文件

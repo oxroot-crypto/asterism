@@ -196,14 +196,14 @@ scene "prologue" {
     -- ==================================================================
 
     -- 7a) 字面量
-    show sayori emotion: "smile"
+    emotion sayori "smile"
 
     -- 7b) 变量 emotion（§0 中 $emo_surprise = "surprise"）
-    show sayori emotion: $emo_surprise with dissolve(0.3)
+    emotion sayori $emo_surprise with dissolve(0.3)
 
     -- 7c) 变量 char_id + 变量 emotion
-    show $char_friend emotion: "laugh"
-    show $char_friend emotion: "wink" with dissolve(0.2)
+    emotion $char_friend "laugh"
+    emotion $char_friend "wink" with dissolve(0.2)
 
     -- ==================================================================
     -- §8  MoveChar — 将已显示角色平滑移动到新位置
@@ -249,10 +249,10 @@ scene "prologue" {
     -- ==================================================================
 
     -- 10a) 字面量
-    hide sprite "ui/icon_heart.png"
+    usprite "ui/icon_heart.png"
 
     -- 10b) 变量路径 + 转场 duration 表达式
-    hide sprite $icon_star with fade($base_delay * 0.5)
+    usprite $icon_star with fade($base_delay * 0.5)
 
     -- ==================================================================
     -- §11 Wait — 暂停指定毫秒数
@@ -364,7 +364,7 @@ scene "prologue" {
 
     -- 19a) 简单 if（比较运算符 >=）
     if $affection_sayori >= 3 {
-        sayori emotion: "happy"
+        emotion sayori "happy"
         sayori "看来我们的羁绊已经很深了呢。"
     }
 
@@ -411,7 +411,7 @@ scene "prologue" {
 
     -- 19g) 嵌套 if（条件分支内可包含任意 SceneNode）
     if $affection_akane >= 2 {
-        akane emotion: "happy"
+        emotion akane "happy"
         akane "嘿嘿，谢谢！"
 
         if %met_akane {
