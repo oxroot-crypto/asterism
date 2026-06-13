@@ -19,21 +19,29 @@
 //!
 //! | 模块 | 文件 | 说明 |
 //! |------|------|------|
+//! | `asset` | `asset.rs` | 资源类型：`AssetId`（newtype）、`AssetType`（8 种资源类别）、`Asset`（资源元数据） |
+//! | `character` | `character.rs` | 角色定义：`Character`（id/name/display_color/description/birthday/default_position/sprites/voice）、`VoiceConfig` |
+//! | `expr` | `expr.rs` | 表达式类型：`Expr`（7 种 AST 节点）、`BinaryOp`（12 种二元运算符）、`UnaryOp`（2 种一元运算符），parser 和 compiler 共享 |
 //! | `project` | `project.rs` | 项目元数据：`Project`、`Resolution`、`ProjectSettings`、`TextSpeed` |
-//! | `character` | `character.rs` | 角色定义：`Character`（id/name/display_color/sprites/voice_prefix） |
 //! | `scene` | `scene.rs` | 场景定义：`Scene`、`SceneNode`（25 种变体）、`Choice`、`Position`、`TransitionSpec` |
+//! | `variable` | `variable.rs` | 变量系统：`VariableStore`（变量表）、`Value`（6 种值类型）、`FlagSet`（旗标集合） |
 //!
 //! ## 待后续任务实现
 //!
-//! - **PH1-T03**：`Asset`、`AssetId`、`AssetType`（`asset.rs`）、`VariableStore`、`Value`、`FlagSet`（`variable.rs`）
 //! - **Phase 2**：`SaveData`（`save.rs`）、`Theme`（`theme.rs`）
 
 // 模块声明
+pub mod asset;
 pub mod character;
+pub mod expr;
 pub mod project;
 pub mod scene;
+pub mod variable;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_core::TypeName` 直接引用
-pub use character::Character;
+pub use asset::{Asset, AssetId, AssetType};
+pub use character::{Character, VoiceConfig};
+pub use expr::{BinaryOp, Expr, UnaryOp};
 pub use project::{Project, ProjectSettings, Resolution, TextSpeed};
 pub use scene::{Choice, Position, Scene, SceneNode, TransitionSpec};
+pub use variable::{FlagSet, Value, VariableStore};

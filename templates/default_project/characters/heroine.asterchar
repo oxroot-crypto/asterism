@@ -1,20 +1,47 @@
-# heroine.asterchar — 示例角色定义
+# heroine.asterchar — 示例角色定义（小百合）
 # 文件格式：TOML
-# 每个 .asterchar 文件定义一个角色及其立绘变体
+# 每个 .asterchar 文件定义一个角色，包含基本信息、立绘变体和语音配置
+# 文件名即角色 ID（不含扩展名），脚本中通过 ID 引用角色
+#
+# 资源查找约定（无前缀，按角色 ID 目录组织）：
+#   立绘：assets/sprites/<角色id>/<表情名>.png
+#   语音：assets/voices/<角色id>/<编号>.ogg
+#
+# 创建日期：2026-06-13
 
 [character]
+# 角色 ID — 唯一标识符，脚本中通过此 ID 引用（如 show sayori at center）
 id = "sayori"
+# 角色显示名 — 对话框中显示的名称
 name = "小百合"
+# 角色显示色 — 用于对话框名称文字颜色（HEX 格式）
 display_color = "#F8BBD0"
+# 角色简介 — 用于角色面板、CAST 列表等
+description = "温柔内向的青梅竹马，喜欢樱花和文学。"
+# 角色生日（可选，用于引擎内置的生日彩蛋功能）
+birthday = "03-21"
+# 角色立绘默认锚点（center = 屏幕水平居中、底部对齐）
+default_position = "center"
 
-# 立绘变体 — 扁平 key-value 格式，key 为表情名，value 为资源路径
+# ==============================================================
+# 立绘变体 — 扁平 key-value 格式
+#   key  = 表情/姿态名称（脚本中 show <角色> emotion: "key" 引用）
+#   value = 立绘文件名（引擎自动从 assets/sprites/<角色id>/ 目录加载）
+# ==============================================================
 [character.sprites]
-default = "sayori_default.png"
-smile = "sayori_smile.png"
-angry = "sayori_angry.png"
-embarrassed = "sayori_embarrassed.png"
-surprise = "sayori_surprise.png"
+default = "default.png"
+smile = "smile.png"
+angry = "angry.png"
+embarrassed = "embarrassed.png"
+surprise = "surprise.png"
+sad = "sad.png"
+happy = "happy.png"
 
+# ==============================================================
 # 语音配置（可选）
+#   引擎按 assets/voices/<角色id>/<编号>.ogg 自动匹配语音文件
+#   未配置此节的角色不启用语音
+# ==============================================================
 [character.voice]
-prefix = "sayori"    # 语音文件前缀，如 sayori_0001.ogg
+# 语音音量（0.0 ~ 1.0，默认 1.0）
+volume = 0.9

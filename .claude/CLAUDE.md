@@ -280,9 +280,11 @@ export async function checkSyntax(source: string): Promise<Diagnostic[]> {
 
 ### 3.3 提交前自检清单
 
-在提交代码前，AI 必须自行完成以下检查：
+在提交代码前，AI 必须自行完成以下检查。
 
-- [ ] `cargo fmt --check` 通过
+> 注：`cargo fmt` 已通过 `.githooks/pre-commit` 自动化（见 3.5 节），以下为兜底验证。
+
+- [ ] `cargo fmt --check` 通过（Hook 已自动执行，此处二次确认）
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` 通过（零 warning）
 - [ ] `cargo test --workspace` 通过
 - [ ] `pnpm --dir ide typecheck` 通过
@@ -325,6 +327,61 @@ Thumbs.db
 - 依赖目录（`node_modules/`）
 - 操作系统的元数据文件
 - 用户的本地 IDE 配置（`.vscode/` 除外，允许共享推荐扩展和调试配置）
+
+### 3.5 Git Hook — 自动格式化
+
+项目通过 `.githooks/pre-commit` 在每次 `git commit` 前**自动执行 `cargo fmt`**，确保所有 Rust 代码提交前已格式化。
+
+**Hook 文件**：`.githooks/pre-commit`
+
+```bash
+#!/usr/bin/env bash
+# Asterism Pre-Commit Hook — 提交前自动 cargo fmt
+#
+# 功能：
+# 1. 检测是否有待提交的 .rs 文件变更
+# 2. 如有，执行 cargo fmt --all 自动格式化
+# 3. 将格式化后的变更重新添加到暂存区
+# 4. 如有未格式化文件，输出提示后继续提交
+
+set -euo pipefail
+
+# 检测暂存区中是否有 .rs 文件
+STAGED_RUST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+
+if [ -n "$STAGED_RUST_FILES" ]; then
+  echo "→ 检测到 Rust 文件变更，执行 cargo fmt --all ..."
+  
+  # 执行自动格式化
+  if cargo fmt --all; then
+    echo "✓ cargo fmt 完成"
+    
+    # 将格式化后的变更重新添加到暂存区
+    for file in $STAGED_RUST_FILES; do
+      if [ -f "$file" ]; then
+        git add "$file"
+      fi
+    done
+    echo "✓ 已更新暂存区"
+  else
+    echo "✗ cargo fmt 执行失败，提交已阻止"
+    exit 1
+  fi
+else
+  echo "→ 无 Rust 文件变更，跳过 cargo fmt"
+fi
+```
+
+**启用 Hook**（开发者首次克隆后执行）：
+
+```bash
+# 将仓库的 .githooks 目录设置为 Git hook 路径
+git config core.hooksPath .githooks
+```
+
+或在 `.claude/settings.json` 中配置 AI 在首次 `git commit` 前自动执行此命令。
+
+> **注意**：`.githooks/` 目录及其脚本需提交到仓库，确保所有开发者使用相同的 hook。
 
 ---
 
@@ -408,8 +465,8 @@ pub enum SceneNode {
     /// - voice_id: 可选的语音文件资源 ID
     Dialogue {
         speaker: String,
-        text: String,
-        voice_id: Option<AssetId>,
+        text: Expr,
+        voice_id: Option<Expr>,
     },
 
     /// 菜单/选择支节点：显示一组选项并等待玩家选择

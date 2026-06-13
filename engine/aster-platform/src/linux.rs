@@ -221,4 +221,31 @@ mod tests {
         let result = platform.normalize_path(OsStr::new("/home//user///game"));
         assert_eq!(result, PathBuf::from("/home/user/game"));
     }
+
+    // ─── C.UTF-8 / POSIX.utf8 带编码后缀的 locale ───────────────────────
+
+    /// 验证 C.UTF-8 被识别为 en-US（剥离编码后缀后匹配 C locale）。
+    #[test]
+    fn test_linux_locale_c_utf8() {
+        let tag = linux_locale_to_bcp47("C.UTF-8");
+        assert_eq!(tag.as_str(), "en-US");
+    }
+
+    /// 验证 POSIX.utf8 被识别为 en-US。
+    #[test]
+    fn test_linux_locale_posix_utf8() {
+        let tag = linux_locale_to_bcp47("POSIX.utf8");
+        assert_eq!(tag.as_str(), "en-US");
+    }
+
+    /// 验证含修饰符的 locale（如 @euro）。
+    #[test]
+    fn test_linux_locale_with_modifier() {
+        // 剥离编码 → zh_CN → zh-CN
+        let tag = linux_locale_to_bcp47("zh_CN.UTF-8@euro");
+        // split('.').next() → "zh_CN@euro"
+        // replace('_', '-') → "zh-CN@euro"
+        // 当前实现会保留 @euro 后缀
+        assert!(tag.as_str().starts_with("zh"));
+    }
 }

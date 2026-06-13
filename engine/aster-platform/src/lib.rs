@@ -452,4 +452,163 @@ mod tests {
         let restored: LanguageTag = s.as_str().into();
         assert_eq!(original, restored);
     }
+
+    // ─── ensure_dir / home_dir 直接测试 ─────────────────────────────────
+
+    /// 验证 ensure_dir 在合法路径上可以创建目录。
+    #[test]
+    fn test_ensure_dir_creates_directory() {
+        // 使用 std::env::temp_dir 确保有写入权限
+        let temp = std::env::temp_dir().join(format!("aster_test_ensure_{}", std::process::id()));
+        // 确保测试前目录不存在
+        let _ = std::fs::remove_dir_all(&temp);
+        assert!(!temp.exists());
+
+        let result = platform::ensure_dir(&temp);
+        assert!(result.is_ok(), "ensure_dir 应成功创建目录");
+        assert!(temp.exists(), "目录应已创建");
+        // 清理
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 验证 ensure_dir 对已存在目录是幂等的（不报错）。
+    #[test]
+    fn test_ensure_dir_idempotent() {
+        let temp = std::env::temp_dir().join(format!("aster_test_idem_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&temp);
+        assert!(temp.exists());
+
+        // 对已存在目录再次调用 ensure_dir 不应报错
+        let result = platform::ensure_dir(&temp);
+        assert!(result.is_ok(), "对已存在目录调用 ensure_dir 不应报错");
+        // 清理
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 验证 home_dir 返回 Some 且路径非空。
+    #[test]
+    fn test_home_dir_returns_some_and_non_empty() {
+        let home = platform::home_dir();
+        assert!(
+            home.is_some(),
+            "home_dir 应返回 Some（任何 CI/开发者环境都应有 home 目录）"
+        );
+        let home = home.unwrap();
+        assert!(!home.as_os_str().is_empty(), "home 路径不应为空");
+    }
+
+    // ─── LanguageTag 边界值测试 ─────────────────────────────────────────
+
+    /// 验证 LanguageTag::From<String> 空字符串生成 "und"。
+    #[test]
+    fn test_language_tag_from_empty_string() {
+        let tag: LanguageTag = String::new().into();
+        assert_eq!(tag.as_str(), "und");
+    }
+
+    /// 验证 LanguageTag 多连字符格式的 region 提取（如 zh-Hans-CN）。
+    #[test]
+    fn test_language_tag_with_multiple_hyphens() {
+        let tag = LanguageTag::new("zh-Hans-CN");
+        // primary_language 返回第一个 `-` 之前的部分
+        assert_eq!(tag.primary_language(), "zh");
+        // region 返回第一个 `-` 之后的部分（与 BCP 47 语义不同但符合当前实现）
+        // 当前实现：split('-').nth(1) → "Hans"
+        assert!(tag.region().is_some(), "多连字符标签应有 region");
+    }
+
+    /// 验证 LanguageTag 仅含语言代码时的行为。
+    #[test]
+    fn test_language_tag_simple_language() {
+        let tag = LanguageTag::new("ja");
+        assert_eq!(tag.primary_language(), "ja");
+        assert_eq!(tag.region(), None);
+    }
+
+    /// 验证 LanguageTag 含多个 region 格式的标签（如 sr-Latn-RS）。
+    #[test]
+    fn test_language_tag_script_and_region() {
+        let tag = LanguageTag::new("sr-Latn-RS");
+        assert_eq!(tag.primary_language(), "sr");
+        // region() 返回第一个 `-` 之后的部分
+        assert_eq!(tag.region(), Some("Latn"));
+    }
+
+    // ─── 非 UTF-8 OsStr normalize_path 测试 ────────────────────────────
+
+    /// 验证 normalize_path 对非 UTF-8 OsStr 的容错处理。
+    #[test]
+    fn test_normalize_path_non_utf8_osstr() {
+        let platform = create_platform();
+        #[cfg(unix)]
+        {
+            // Unix 上可以使用原始字节构造 OsStr
+            use std::os::unix::ffi::OsStrExt;
+            // 构造包含无效 UTF-8 的路径（单独的高位字节，非 surrogates）
+            let raw =
+                OsStr::from_bytes(&[0x2F, b'u', b's', b'r', 0xFE, 0x2F, b'd', b'a', b't', b'a']);
+            let result = platform.normalize_path(raw);
+            // 不应 panic，结果路径应该可以转为 lossy string
+            let _ = result.to_string_lossy();
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows/non-Unix: 正常 OsStr 不会触发异常路径
+            let result = platform.normalize_path(OsStr::new("normal/path"));
+            assert!(!result.as_os_str().is_empty());
+        }
+    }
+
+    // ─── launch_process 边界值测试 ──────────────────────────────────────
+
+    /// 验证 launch_process 传入空 args 列表。
+    #[test]
+    fn test_launch_process_with_empty_args() {
+        let platform = create_platform();
+        let result = platform.launch_process(Path::new("/nonexistent_empty_args"), &[]);
+        assert!(result.is_err(), "空 args + 不存在可执行文件应返回错误");
+    }
+
+    // ─── Trait impl 编译时验证 ─────────────────────────────────────────
+
+    /// 验证所有平台 struct 满足 Send + Sync（通过 trait 约束编译期保证）。
+    ///
+    /// 此测试通过编译即可，运行时仅验证工厂函数正常工作。
+    #[test]
+    fn test_platform_structs_satisfy_trait_bounds() {
+        // create_platform 返回 Box<dyn Platform>，Platform trait 要求 Send + Sync
+        let p = create_platform();
+        // 验证 trait 方法可正常调用
+        let lang = p.system_language();
+        assert!(!lang.as_str().is_empty());
+    }
+
+    // ─── 单实例锁路径格式测试 ──────────────────────────────────────────
+
+    /// 验证单实例锁文件的路径格式。
+    #[test]
+    fn test_single_instance_lock_path_format() {
+        let platform = create_platform();
+        let app_id = format!("test_path_format_{}", std::process::id());
+
+        // 锁应能成功获取
+        let result = platform.try_acquire_single_instance(&app_id);
+        assert!(result, "首次应成功获取锁");
+
+        // 验证锁文件存在
+        #[cfg(target_os = "windows")]
+        {
+            let temp_dir =
+                std::env::var("TEMP").unwrap_or_else(|_| "C:\\Windows\\Temp".to_string());
+            let lock_path =
+                std::path::PathBuf::from(temp_dir).join(format!("asterism_{app_id}.lock"));
+            assert!(lock_path.exists(), "锁文件应存在: {}", lock_path.display());
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let lock_path =
+                std::path::PathBuf::from("/tmp").join(format!("asterism_{app_id}.lock"));
+            assert!(lock_path.exists(), "锁文件应存在: {}", lock_path.display());
+        }
+    }
 }

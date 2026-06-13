@@ -24,13 +24,17 @@ use serde::{Deserialize, Serialize};
 /// # 序列化
 ///
 /// 通过 serde 派生支持 TOML 序列化/反序列化：
-/// ```rust,ignore
-/// let project: Project = toml::from_str(&fs::read_to_string("project.toml")?)?;
+/// ```rust,no_run
+/// # use aster_core::Project;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let project: Project = toml::from_str(&std::fs::read_to_string("project.toml")?)?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// # 示例
-/// ```rust,ignore
-/// use aster_core::Project;
+/// ```
+/// use aster_core::{Project, Resolution, ProjectSettings};
 ///
 /// let project = Project {
 ///     name: "My First Visual Novel".into(),
@@ -422,5 +426,56 @@ mod tests {
         // 从整数反序列化
         let from_int: TextSpeed = serde_json::from_str("50").expect("JSON 反序列化失败");
         assert_eq!(from_int, TextSpeed::Custom(50.0));
+    }
+
+    // ─── TextSpeed 反序列化错误路径 ──────────────────────────────────────
+
+    /// 验证 TextSpeed 反序列化时拒绝无效的速度字符串。
+    #[test]
+    fn text_speed_rejects_invalid_string() {
+        let result: Result<TextSpeed, _> = serde_json::from_str(r#""ultra""#);
+        assert!(
+            result.is_err(),
+            "无效速度字符串 \"ultra\" 应导致反序列化错误"
+        );
+    }
+
+    /// 验证 TextSpeed 反序列化时拒绝布尔值。
+    #[test]
+    fn text_speed_rejects_bool() {
+        let result: Result<TextSpeed, _> = serde_json::from_str("true");
+        assert!(result.is_err(), "布尔值不应反序列化为 TextSpeed");
+    }
+
+    /// 验证 TextSpeed 反序列化时拒绝 null。
+    #[test]
+    fn text_speed_rejects_null() {
+        let result: Result<TextSpeed, _> = serde_json::from_str("null");
+        assert!(result.is_err(), "null 不应反序列化为 TextSpeed");
+    }
+
+    // ─── ProjectSettings 边界值 ──────────────────────────────────────────
+
+    /// 验证 ProjectSettings 支持所有合法的 TextSpeed 变体。
+    #[test]
+    fn project_settings_all_text_speeds() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq)]
+        struct Wrapper {
+            text_speed: TextSpeed,
+        }
+
+        let speeds: Vec<(&str, TextSpeed)> = vec![
+            ("\"instant\"", TextSpeed::Instant),
+            ("\"slow\"", TextSpeed::Slow),
+            ("\"normal\"", TextSpeed::Normal),
+            ("\"fast\"", TextSpeed::Fast),
+            ("25.0", TextSpeed::Custom(25.0)),
+        ];
+        for (json_val, expected) in &speeds {
+            let json = format!(r#"{{"text_speed": {}}}"#, json_val);
+            let restored: Wrapper = serde_json::from_str(&json)
+                .unwrap_or_else(|e| panic!("反序列化 text_speed={json_val} 失败: {e}"));
+            assert_eq!(&restored.text_speed, expected);
+        }
     }
 }
