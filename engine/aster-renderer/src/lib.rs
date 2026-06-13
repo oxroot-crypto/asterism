@@ -29,12 +29,16 @@
 // 模块声明
 // ============================================================================
 
+pub mod background_layer;
 pub mod config;
 pub mod gpu_context;
+pub mod texture;
 
 // ============================================================================
 // 公开导出 — 核心类型
 // ============================================================================
 
+pub use background_layer::{BackgroundLayer, FitMode};
 pub use config::RenderConfig;
 pub use gpu_context::{Frame, GpuContext, RenderError};
+pub use texture::{Texture, create_texture_bind_group_layout};

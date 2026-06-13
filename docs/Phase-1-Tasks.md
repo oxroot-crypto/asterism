@@ -19,7 +19,7 @@
 | PH1-T04 | 实现 `aster-parser` — PEG 语法定义与解析器框架 | P0 | 6h | PH1-T02（依赖 aster-core 类型） | [x] |
 | PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [x] |
 | PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [x] |
-| PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [ ] |
+| PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [x] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [ ] |
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 6 | 进行中: 0 | 待开始: 15
+**统计**：总计 21 个任务 | 已完成: 7 | 进行中: 0 | 待开始: 14
 
 ---
 
@@ -627,7 +627,7 @@ graph TD
 | **对应需求** | REQ-ENG-011（背景图片渲染） |
 | **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `SpriteBatcher`、`LayerManager` 组件） |
 | **前置依赖** | PH1-T02（aster-core AssetId 类型引用）, PH1-T06（GpuContext） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -687,6 +687,22 @@ graph TD
 | MV01 | 背景图片正确显示 | 运行渲染器测试程序，加载一张测试 PNG 背景图，观察窗口 | 窗口显示背景图片，图片覆盖整个窗口，不变形 |
 | MV02 | 背景切换 | 在测试程序中先显示背景 A，等待 2 秒后切换到背景 B | 背景从 A 变为 B，切换无闪烁 |
 | MV03 | 不同宽高比素材 | 分别加载 16:9、4:3、1:1 宽高比的背景图，观察显示效果 | 所有宽高比下图片正确缩放（裁剪或留黑边），无拉伸变形 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 18:00
+- 实际工时：5 小时
+- AI自验证结果：✅ AC01-AC04 全部通过（31/31 测试通过，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV03 全部通过
+- 备注：Surface 格式通过 `ctx.surface_config().format` 动态传入以兼容 Bgra8UnormSrgb（DX12）和 Rgba8UnormSrgb。着色器采用非均匀 UV 缩放（分别计算 U/V 方向可见范围）保证宽高比适配无拉伸。FitMode 支持 Cover/Contain 双模式。set_background 接收 &Queue 以立即刷新 uniform 纹理尺寸。
+
+**上下文交接**：
+- 关键决策：全屏四边形使用无顶点缓冲大三角形方案（3 顶点覆盖 NDC）；fit uniform 在 set_background/resize/set_fit_mode 时立即更新；ColorTargetState 格式由调用方传入适配 surface
+- 新增接口：`Texture::from_file(device, queue, path, label) -> Result<Texture>` / `from_bytes(...)` / `BackgroundLayer::new(device, queue, format, w, h)` / `set_background(queue, tex)` / `set_background_and_return_old(queue, tex) -> Option<Texture>` / `render(encoder, view)` / `resize(queue, w, h)` / `set_fit_mode(queue, mode)`
+- 新增类型：`Texture { id, texture, sampler, bind_group, width, height, bind_group_layout }` / `FitMode { Cover, Contain }` / `FitUniform`（CPU 端镜像）
+- 已修复问题：V 翻转（wgpu 左上角原点）、cover/contain 公式（min/max 对调）、非均匀 UV 缩放替代 uniform scale
+- 已知限制：contain 模式黑边通过 shader 显式检测 UV 越界返回 black 实现（非独立清屏 pass），大量纹理切换时需注意 uniform 更新开销
+- 建议下一个任务先读取：`background_layer.rs`（管线创建模式）、`texture.rs`（纹理加载流程）、`shaders/fullscreen_quad.wgsl`（着色器接口）
 
 ---
 ### PH1-T08 — 角色立绘渲染

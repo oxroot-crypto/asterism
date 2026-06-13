@@ -44,6 +44,8 @@ thiserror = "2"
 wgpu = "24.0.5"
 winit = "0.30.13"
 pollster = "0.4"
+image = "0.25"
+bytemuck = { version = "1", features = ["derive"] }
 
 # ============================================================
 # 编译配置文件
