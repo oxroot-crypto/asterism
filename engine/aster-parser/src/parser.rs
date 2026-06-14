@@ -507,8 +507,8 @@ mod tests {
 
     #[test]
     fn test_parse_call() {
-        let source = "scene \"test\" {\n    call \"subroutine_name\"\n}";
-        assert!(parse_script(source).is_ok(), "call 语句应成功解析");
+        let source = "scene \"test\" {\n    subroutine_name()\n}";
+        assert!(parse_script(source).is_ok(), "函数式调用语句应成功解析");
     }
 
     #[test]

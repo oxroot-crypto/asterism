@@ -99,40 +99,67 @@ mod tests {
         assert_eq!(scene.id, "prologue", "场景 ID 应为 'prologue'");
         assert!(!scene.nodes.is_empty(), "prologue.aster 应产生非空节点列表");
 
-        // 验证包含全部 25 种节点类型
-        let variant_names: Vec<&str> = scene
-            .nodes
-            .iter()
-            .map(|n| match n {
-                SceneNode::Bg { .. } => "Bg",
-                SceneNode::ShowChar { .. } => "ShowChar",
-                SceneNode::ShowSprite { .. } => "ShowSprite",
-                SceneNode::MoveChar { .. } => "MoveChar",
-                SceneNode::Emotion { .. } => "Emotion",
-                SceneNode::HideChar { .. } => "HideChar",
-                SceneNode::HideSprite { .. } => "HideSprite",
-                SceneNode::Dialogue { .. } => "Dialogue",
-                SceneNode::Narration { .. } => "Narration",
-                SceneNode::Menu { .. } => "Menu",
-                SceneNode::Branch { .. } => "Branch",
-                SceneNode::SetVariable { .. } => "SetVariable",
-                SceneNode::SetFlag { .. } => "SetFlag",
-                SceneNode::UnsetFlag { .. } => "UnsetFlag",
-                SceneNode::ToggleFlag { .. } => "ToggleFlag",
-                SceneNode::Music { .. } => "Music",
-                SceneNode::StopMusic { .. } => "StopMusic",
-                SceneNode::PlaySE { .. } => "PlaySE",
-                SceneNode::Effect { .. } => "Effect",
-                SceneNode::Wait { .. } => "Wait",
-                SceneNode::Jump { .. } => "Jump",
-                SceneNode::Goto { .. } => "Goto",
-                SceneNode::Call { .. } => "Call",
-                SceneNode::Return => "Return",
-                SceneNode::Label { .. } => "Label",
-            })
-            .collect();
+        // 验证包含全部 25 种节点类型（递归收集，包括 Subroutine/Branch/Menu body 内部节点）
+        fn collect_variants(nodes: &[SceneNode], out: &mut Vec<&'static str>) {
+            for n in nodes {
+                match n {
+                    SceneNode::Bg { .. } => out.push("Bg"),
+                    SceneNode::ShowChar { .. } => out.push("ShowChar"),
+                    SceneNode::ShowSprite { .. } => out.push("ShowSprite"),
+                    SceneNode::MoveChar { .. } => out.push("MoveChar"),
+                    SceneNode::Emotion { .. } => out.push("Emotion"),
+                    SceneNode::HideChar { .. } => out.push("HideChar"),
+                    SceneNode::HideSprite { .. } => out.push("HideSprite"),
+                    SceneNode::Dialogue { .. } => out.push("Dialogue"),
+                    SceneNode::Narration { .. } => out.push("Narration"),
+                    SceneNode::Menu { choices, .. } => {
+                        out.push("Menu");
+                        for _c in choices {
+                            out.push("Choice");
+                        }
+                    }
+                    SceneNode::Branch {
+                        then_nodes,
+                        elif_branches,
+                        else_nodes,
+                        ..
+                    } => {
+                        out.push("Branch");
+                        collect_variants(then_nodes, out);
+                        for (_, nodes) in elif_branches {
+                            collect_variants(nodes, out);
+                        }
+                        if let Some(else_n) = else_nodes {
+                            collect_variants(else_n, out);
+                        }
+                    }
+                    SceneNode::SetVariable { .. } => out.push("SetVariable"),
+                    SceneNode::SetFlag { .. } => out.push("SetFlag"),
+                    SceneNode::UnsetFlag { .. } => out.push("UnsetFlag"),
+                    SceneNode::ToggleFlag { .. } => out.push("ToggleFlag"),
+                    SceneNode::Music { .. } => out.push("Music"),
+                    SceneNode::StopMusic { .. } => out.push("StopMusic"),
+                    SceneNode::PlaySE { .. } => out.push("PlaySE"),
+                    SceneNode::Effect { .. } => out.push("Effect"),
+                    SceneNode::Wait { .. } => out.push("Wait"),
+                    SceneNode::Jump { .. } => out.push("Jump"),
+                    SceneNode::Goto { .. } => out.push("Goto"),
+                    SceneNode::Call { .. } => out.push("Call"),
+                    SceneNode::Return => out.push("Return"),
+                    SceneNode::Label { .. } => out.push("Label"),
+                    SceneNode::Subroutine { body, .. } => {
+                        out.push("Subroutine");
+                        collect_variants(body, out);
+                    }
+                }
+            }
+        }
 
-        // 验证除 Goto（在 prologue.aster 中以注释形式存在）外的 24 种节点类型
+        let mut variant_names: Vec<&str> = Vec::new();
+        collect_variants(&scene.nodes, &mut variant_names);
+
+        // 验证除 Goto（在 prologue.aster 中以注释形式存在）和
+        // Return（sub 块内 return 由编译器自动插入，无需显式出现在源码中）外的 23 种节点类型
         let all_variants = [
             "Bg",
             "ShowChar",
@@ -156,7 +183,6 @@ mod tests {
             "Wait",
             "Jump",
             "Call",
-            "Return",
             "Label",
         ];
         for variant in &all_variants {

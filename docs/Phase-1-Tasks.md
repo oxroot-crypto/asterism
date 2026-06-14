@@ -26,7 +26,7 @@
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [x] |
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [x] |
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [x] |
-| PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
+| PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [x] |
 | PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [ ] |
 | PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [ ] |
 | PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 13 | 进行中: 0 | 待开始: 8
+**统计**：总计 21 个任务 | 已完成: 14 | 进行中: 0 | 待开始: 7
 
 ---
 
@@ -205,7 +205,7 @@ graph TD
 2. **涉及文件/组件**（共 5 个）：
    - 新建：`engine/aster-core/src/game.rs` — `Game` 结构体 + `GameSettings`（分辨率、默认音量等）
    - 新建：`engine/aster-core/src/character.rs` — `Character` 结构体（id / name / display_color / description? / birthday? / default_position / sprites 表情映射 / voice?: VoiceConfig）+ `VoiceConfig` 结构体（volume）
-   - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（25 变体：Bg / ShowChar / ShowSprite / MoveChar / Emotion / HideChar / HideSprite / Dialogue / Narration / Menu / Branch / SetVariable / SetFlag / UnsetFlag / ToggleFlag / Music / StopMusic / PlaySE / Wait / Effect / Jump / Goto / Call / Return / Label）+ `Choice` + `Position` + `TransitionSpec` 结构体
+   - 新建：`engine/aster-core/src/scene.rs` — `Scene` 结构体 + `SceneNode` 枚举（26 变体：Bg / ShowChar / ShowSprite / MoveChar / Emotion / HideChar / HideSprite / Dialogue / Narration / Menu / Branch / Subroutine / SetVariable / SetFlag / UnsetFlag / ToggleFlag / Music / StopMusic / PlaySE / Wait / Effect / Jump / Goto / Call / Return / Label）+ `Choice` + `Position` + `TransitionSpec` 结构体
    - 修改：`engine/aster-core/src/lib.rs` — 添加 `mod project; mod character; mod scene;` + `pub use` 重导出所有公开类型
    - 修改：`engine/aster-core/Cargo.toml` — 确认 `serde` workspace 依赖已启用 `derive` feature
 
@@ -259,10 +259,10 @@ graph TD
 
 - AI自验证结果：✅ AC01-AC05 全部通过（16/16 单元测试通过，0 clippy warning）
 - 人工测试结果：✅ MV01-MV02 全部通过
-- 备注：实际交付超越原始任务范围（25 变体 vs 原计划 14 变体），新增 Bg / ShowSprite / MoveChar / Emotion / HideSprite / ToggleFlag / Music / StopMusic / Goto / Jump（语义收窄为场景内）变体。Character 新增 description / birthday / default_position / voice?: VoiceConfig 字段。VoiceConfig 仅含 volume（无 prefix），资源按角色 ID 目录组织（assets/sprites/<id>/<emotion>.png、assets/voices/<id>/<number>.ogg）。Jump 改为仅场景内 Label 跳转，Goto 负责跨场景跳转。TextSpeed 新增 Custom(f32) 变体。Architecture.md / Phase-1-Tasks.md / lib.rs 注释均已同步更新。
+- 备注：实际交付超越原始任务范围（26 变体 vs 原计划 14 变体），新增 Bg / ShowSprite / MoveChar / Emotion / HideSprite / ToggleFlag / Music / StopMusic / Goto / Jump（语义收窄为场景内）变体。Character 新增 description / birthday / default_position / voice?: VoiceConfig 字段。VoiceConfig 仅含 volume（无 prefix），资源按角色 ID 目录组织（assets/sprites/<id>/<emotion>.png、assets/voices/<id>/<number>.ogg）。Jump 改为仅场景内 Label 跳转，Goto 负责跨场景跳转。TextSpeed 新增 Custom(f32) 变体。Architecture.md / Phase-1-Tasks.md / lib.rs 注释均已同步更新。
 
 **上下文交接**：
-- 关键决策：SceneNode 从 Architecture.md 原定 13 变体扩展到 25 变体，完整覆盖 Phase 1-5 的渲染/动画/音频/控制流需求；Character 新增 description/birthday/default_position/voice 字段 + VoiceConfig 类型（volume only，无 prefix）；资源按角色 ID 目录组织；Jump 收窄为场景内跳转，跨场景由 Goto 独立承担；所有新增变体均派生 Debug+Clone+Serialize+Deserialize+PartialEq
+- 关键决策：SceneNode 从 Architecture.md 原定 13 变体扩展到 26 变体，完整覆盖 Phase 1-5 的渲染/动画/音频/控制流需求；Character 新增 description/birthday/default_position/voice 字段 + VoiceConfig 类型（volume only，无 prefix）；资源按角色 ID 目录组织；Jump 收窄为场景内跳转，跨场景由 Goto 独立承担；所有新增变体均派生 Debug+Clone+Serialize+Deserialize+PartialEq
 - 新增接口：`SceneNode::{Bg, ShowSprite, MoveChar, Emotion, HideSprite, ToggleFlag, Music, StopMusic, Goto}` — 各 1-7 字段；`Character::{description, birthday, default_position, voice}` — 可选字段 + 新类型；`VoiceConfig { volume }` — 语音配置；`TextSpeed::Custom(f32)` — 自定义 ms/char 速率；`Position::to_coords()` — 归一化坐标转换
 - 新增数据表：无（纯类型定义，无持久化）
 - 已知限制：Video 变体留给 Phase 5；Effect 不应用于视频播放（语义不同）；ShowSprite 目前用 asset_path 标识（非唯一 ID），同一资源多次显示时 HideSprite 行为未精确定义
@@ -402,8 +402,8 @@ graph TD
      > REQ-ENG-001: 给定合法的 .aster 文件，解析器返回完整 AST 无错误；给定非法语法，解析器返回带行号/列的诊断信息；解析性能：10,000 行脚本 < 100ms
    - 架构依据（Architecture.md §2.3）：
      > 语法风格：声明式、缩进敏感、贴近自然语言。解析器：pest（PEG 解析器生成器）
-   - .aster DSL 语法示例（Architecture.md §2.3 + `templates/default_project/scripts/prologue.aster`）：完整的 SceneNode 25 变体 + Expr 插值参考脚本
-   - 已有接口：PH1-T02 的 `aster_core::Scene`、`SceneNode`（25 变体，动态字段均为 `Expr`）、`Position`、`Choice`、`Character`（含 description/birthday/default_position/VoiceConfig）、`TransitionSpec`（解析器直接使用这些类型，不重复定义）
+   - .aster DSL 语法示例（Architecture.md §2.3 + `templates/default_project/scripts/prologue.aster`）：完整的 SceneNode 26 变体 + Expr 插值参考脚本
+   - 已有接口：PH1-T02 的 `aster_core::Scene`、`SceneNode`（26 变体，动态字段均为 `Expr`）、`Position`、`Choice`、`Character`（含 description/birthday/default_position/VoiceConfig）、`TransitionSpec`（解析器直接使用这些类型，不重复定义）
 
 5. **🚫 本任务不做什么**：
    - 不构建 AST（pest token → `aster_core::Scene` 转换属于 PH1-T05）
@@ -458,7 +458,7 @@ graph TD
 
 #### 任务说明
 
-1. **开发目标**：实现 pest token 流 → `aster_core::Scene` 的 AST 构建器（`AstBuilder`）。**不定义解析器专用的 AST 类型**——直接复用 `aster-core` 的 `Scene`、`SceneNode`（25 变体，所有动态字段均为 `Expr`）、`Position`、`Choice`、`TransitionSpec`、`Expr`、`BinaryOp`、`UnaryOp` 等已定义类型（表达式和运算符类型已在 PH1-T03 中定义于 `aster-core`）。
+1. **开发目标**：实现 pest token 流 → `aster_core::Scene` 的 AST 构建器（`AstBuilder`）。**不定义解析器专用的 AST 类型**——直接复用 `aster-core` 的 `Scene`、`SceneNode`（26 变体，所有动态字段均为 `Expr`）、`Position`、`Choice`、`TransitionSpec`、`Expr`、`BinaryOp`、`UnaryOp` 等已定义类型（表达式和运算符类型已在 PH1-T03 中定义于 `aster-core`）。
 
 2. **架构原则**：
    ```
@@ -489,7 +489,7 @@ graph TD
 5. **关联上下文**：
    - 需求依据（Requirements.md §2.1.1）：
      > REQ-ENG-001: 给定合法的 .aster 文件，解析器返回完整 AST 无错误；给定非法语法，解析器返回带行号/列的诊断信息
-   - 已有接口：PH1-T02 的 `aster_core::Scene`、`SceneNode`（25 变体，动态字段均为 `Expr`）、`Position`、`Choice`、`Character`（含 description/birthday/default_position/VoiceConfig）、`TransitionSpec`；PH1-T03 的 `Expr`（7 变体：StringLiteral/IntLiteral/FloatLiteral/BoolLiteral/Variable/BinaryOp/UnaryOp）、`BinaryOp`（12 种）、`UnaryOp`（2 种）、`Value`、`VariableStore`、`FlagSet`、`AssetId`
+   - 已有接口：PH1-T02 的 `aster_core::Scene`、`SceneNode`（26 变体，动态字段均为 `Expr`）、`Position`、`Choice`、`Character`（含 description/birthday/default_position/VoiceConfig）、`TransitionSpec`；PH1-T03 的 `Expr`（7 变体：StringLiteral/IntLiteral/FloatLiteral/BoolLiteral/Variable/BinaryOp/UnaryOp）、`BinaryOp`（12 种）、`UnaryOp`（2 种）、`Value`、`VariableStore`、`FlagSet`、`AssetId`
    - 已有接口：PH1-T04 的 `parse_script()`（返回 pest token 流）和 `ParseError`
    - 参考脚本：`templates/default_project/scripts/prologue.aster`（574 行，覆盖全部 25 SceneNode + Expr 插值）
    - pest 文档参考：`pest::iterators::Pair` API 用于遍历解析树
@@ -506,7 +506,7 @@ graph TD
 
 | 编号 | 验收项 | 验证方式 | 预期结果 |
 |------|--------|----------|----------|
-| AC01 | `prologue.aster`（574 行，25 变体+Expr）解析为正确的 `aster_core::Scene` | 单元测试：解析 `templates/default_project/scripts/prologue.aster`，断言 `Scene.id == "prologue"`，`nodes` 包含 `Bg`、`ShowChar`、`ShowSprite`、`MoveChar`、`Emotion`、`HideChar`、`HideSprite`、`Dialogue`、`Narration`、`Menu`、`Branch`、`SetVariable`、`SetFlag`、`UnsetFlag`、`ToggleFlag`、`Music`、`StopMusic`、`PlaySE`、`Effect`、`Wait`、`Jump`、`Goto`、`Call`、`Return`、`Label` 全部 25 种节点，且 Expr 字段包含变量引用/字符串拼接/二元/一元运算 | Scene 结构完整，全部节点类型和 Expr 插值正确 |
+| AC01 | `prologue.aster`（574 行，26 变体+Expr）解析为正确的 `aster_core::Scene` | 单元测试：解析 `templates/default_project/scripts/prologue.aster`，断言 `Scene.id == "prologue"`，`nodes` 包含 `Bg`、`ShowChar`、`ShowSprite`、`MoveChar`、`Emotion`、`HideChar`、`HideSprite`、`Dialogue`、`Narration`、`Menu`、`Branch`、`SetVariable`、`SetFlag`、`UnsetFlag`、`ToggleFlag`、`Music`、`StopMusic`、`PlaySE`、`Effect`、`Wait`、`Jump`、`Goto`、`Call`、`Return`、`Label` 全部 25 种节点，且 Expr 字段包含变量引用/字符串拼接/二元/一元运算 | Scene 结构完整，全部节点类型和 Expr 插值正确 |
 | AC02 | 多次语法错误可在一次解析中全部收集 | 单元测试：输入含有 3 个独立语法错误的脚本，断言返回 `Err` 且包含 3 个 `ParseError` | 一次解析收集所有错误 |
 | AC03 | 空的 scene 块解析正确 | 单元测试：`scene "empty" { }` 解析成功，`nodes` 为空列表 | Ok，nodes = [] |
 | AC04 | 嵌套 `if/elif/else` 条件分支解析正确 | 单元测试：输入包含 `if/elif/else` 的 scene，断言 AST 中 `Branch` 节点的 `then_nodes`、`elif_branches`、`else_nodes` 结构正确 | 嵌套条件解析正确 |
@@ -533,7 +533,7 @@ graph TD
 - 关键决策：AstBuilder 不持有状态，全部为关联函数；`parse_script()` 返回 `Result<aster_core::Scene, Vec<ParseError>>` 直接产出编译器可消费的 AST；表达式按 pest 语法优先级链递归下降，每层左结合折叠；position / transition 规则为命名规则（非静默），需在构建时解包一层到内部变体
 - 新增接口：`AstBuilder::build(Pairs<Rule>, &str) -> Result<Scene, Vec<ParseError>>` — 顶层入口；`parse_script(&str) -> Result<Scene, Vec<ParseError>>` — 公共 API；`AstBuilder` 从 `aster_parser` crate 重导出
 - 已知限制：部分 builder 方法使用 `inner.next().unwrap()`（grammar 保证非空但未做防御性检查）；flag_ref 在 Expr 中统一映射为 `Expr::Variable`（`%` 前缀被去除，compiler 需自行区分变量与旗标）；空文件解析返回空 Scene（id=""）
-- 建议下一个任务先读取：`engine/aster-parser/src/builder/mod.rs`（架构概览）、`engine/aster-parser/src/builder/statements.rs`（所有语句构建逻辑）、`engine/aster-core/src/scene.rs`（SceneNode 25 变体定义）
+- 建议下一个任务先读取：`engine/aster-parser/src/builder/mod.rs`（架构概览）、`engine/aster-parser/src/builder/statements.rs`（所有语句构建逻辑）、`engine/aster-core/src/scene.rs`（SceneNode 26 变体定义）
 
 ---
 ### PH1-T06 — wgpu 设备初始化 + 窗口创建
@@ -1011,7 +1011,7 @@ graph TD
    - **IR 指令**（Architecture.md §4.4 字节码指令集对应）：
      - 数据指令：`PushStr(reg, str_idx)` / `PushInt(reg, i32)` / `PushFloat(reg, f32)` / `PushBool(reg, bool)`
      - 渲染指令：`Bg(asset_idx)` / `ShowChar(char_idx, pos, emotion_idx)` / `HideChar(char_idx)` / `Dialogue(speaker_idx, text_idx)` / `Narrate(text_idx)` / `Menu(choices_ptr)`
-     - 控制流：`Jump(label_idx)` / `JumpIf(reg, label_idx)` / `JumpIfFlag(flag_idx, label_idx)` / `Call(label_idx)` / `Return`
+     - 控制流：`Jump(label_idx)` / `JumpIf(reg, label_idx)` / `JumpIfFlag(flag_idx, label_idx)` / `Call(label_idx, args)` / `Return`
      - 变量/旗标：`SetVar(name_idx, value_reg)` / `SetFlag(flag_idx)` / `UnsetFlag(flag_idx)` / `ToggleFlag(flag_idx)`
      - 其他：`Wait(duration_ms)` / `End`
    - **常量池**：编译期间收集所有字符串字面量（说话者名、对话文本、资源路径、标签名等）到常量池 `Vec<String>`，IR 和字节码中通过索引引用
@@ -1027,7 +1027,7 @@ graph TD
    - 需求依据（Requirements.md §2.1.1）：
      > REQ-ENG-002: 引擎必须将 AST 编译为字节码，并由指令式虚拟机执行。VM 支持顺序执行、条件跳转、变量/旗标存取、子例程调用。相同脚本经编译→执行产生的结果一致
    - 架构依据（Architecture.md §4.4）：IR→Bytecode 编译管线 + 4 个优化 Pass + 字节码指令集（Opcode 表 0x01~0xFF）
-   - 已有接口：PH1-T05 的 `AstBuilder`（产出 `aster_core::Scene`）；PH1-T03 的 `Expr`（7 变体：StringLiteral/IntLiteral/FloatLiteral/BoolLiteral/Variable/BinaryOp/UnaryOp）、`BinaryOp`（12 种：Add/Sub/Mul/Div/Eq/Neq/Lt/Gt/Le/Ge/And/Or）、`UnaryOp`（2 种：Not/Neg）、`Value` 类型（`aster-core` crate）；PH1-T02 的 `Scene`/`SceneNode`（25 变体，所有动态字段均为 `Expr`）类型
+   - 已有接口：PH1-T05 的 `AstBuilder`（产出 `aster_core::Scene`）；PH1-T03 的 `Expr`（7 变体：StringLiteral/IntLiteral/FloatLiteral/BoolLiteral/Variable/BinaryOp/UnaryOp）、`BinaryOp`（12 种：Add/Sub/Mul/Div/Eq/Neq/Lt/Gt/Le/Ge/And/Or）、`UnaryOp`（2 种：Not/Neg）、`Value` 类型（`aster-core` crate）；PH1-T02 的 `Scene`/`SceneNode`（26 变体，所有动态字段均为 `Expr`）类型
 
 5. **🚫 本任务不做什么**：
    - 不实现 4 个优化 Pass（Constant Folding / Dead Label / Jump Threading / Peephole — 属于 PH1-T12）
@@ -1300,7 +1300,7 @@ graph TD
 | **对应需求** | REQ-ENG-003（变量与旗标系统 — VM 执行部分）, REQ-ENG-023（场景/脚本跳转） |
 | **对应架构模块** | `aster-vm`（参考 Architecture.md §4.5） |
 | **前置依赖** | PH1-T03（VariableStore/Value/FlagSet 类型）, PH1-T13（VM 核心 — 基础指令执行框架） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1326,8 +1326,8 @@ graph TD
      - `JUMP_IF(reg, label_idx)`：读取寄存器的布尔值，`true` 则跳转到标签，`false` 则继续下一条指令
      - `JUMP_IF_FLAG(flag_idx, label_idx)`：检查旗标状态，`true` 则跳转
      - `JUMP_IF_NOT(reg, label_idx)`：寄存器值为 `false` 时跳转（支持 if/else 语义）
-   - **子例程调用**：
-     - `CALL(label_idx)`：将当前 `pc + 1` 压入 `call_stack`，跳转到目标标签
+   - **子例程调用（函数式）**：
+     - `CALL(target_offset, arg_count, args...)`：将参数寄存器的值压入操作数栈，当前 `return_pc` 压入 `call_stack`，跳转到目标标签
      - `RETURN`：从 `call_stack` 弹出返回地址，设置 `pc` 为返回地址
      - 调用深度限制：`call_stack.len() >= 256` 时返回运行时错误（防止无限递归）
    - **变量值比较**（编译期生成多条指令实现）：
@@ -1358,8 +1358,8 @@ graph TD
 | AC01 | `$score = 10` → `if $score >= 5` 分支正确执行 | 单元测试：编译含变量赋值和条件分支的脚本 → VM 执行 → 断言执行了正确的分支 | 条件分支正确 |
 | AC02 | 旗标 set → check → toggle → check 序列正确 | 单元测试：执行 SET_FLAG → CHECK_FLAG(true) → TOGGLE_FLAG → CHECK_FLAG(false) | 旗标操作语义正确 |
 | AC03 | `jump "chapter2/start"` 跨场景跳转正确 | 单元测试：两个场景的字节码，第一个结尾 jump 到第二个的标签 → 验证 VM 在第二个场景中从正确位置开始执行 | 跨场景跳转正确，变量不丢失 |
-| AC04 | `call/return` 子例程正确返回 | 单元测试：编译含 `call "helper"` → `label "helper"` → `return` 的脚本 → 断言 return 后 PC 回到 call 的下一条指令 | 子例程调用正确 |
-| AC05 | 递归调用超过 256 层返回错误 | 单元测试：编译无限递归的 call 脚本 → VM 执行 → 断言返回 RuntimeError 而非栈溢出 panic | 递归深度限制生效 |
+| AC04 | `子例程函数式调用/return` 正确返回 | 单元测试：编译含 `helper()` → `sub "helper"` → `return` 的脚本 → 断言 return 后 PC 回到调用点的下一条指令 | 子例程调用正确 |
+| AC05 | 递归调用超过 256 层返回错误 | 单元测试：编译无限递归函数调用的脚本 → VM 执行 → 断言返回 RuntimeError 而非栈溢出 panic | 递归深度限制生效 |
 | AC06 | 读取未定义的变量不 panic | 单元测试：`GET_VAR` 未定义变量 → 断言返回 `EngineCommand::Error` 携带变量名 | 错误优雅处理 |
 
 ##### 👤 人工测试验证
@@ -1368,6 +1368,20 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 条件分支完整测试 | 编译包含完整 `if/elif/else` 逻辑的 .aster 脚本（含变量比较、旗标检查、嵌套条件），VM 执行并观察分支走向 | 所有分支按预期执行，变量值影响分支结果 |
 | MV02 | 场景跳转与变量保持 | 场景 A 中设置 `$score = 100` → jump 到场景 B → 场景 B 中读取 `$score` | `$score` 在场景 B 中仍然为 100，跳转未丢失变量 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 23:00
+- 实际工时：~18 小时（含审查修复、架构重构、文档同步）
+- AI自验证结果：✅ AC01-AC06 全部通过（41 单元测试 + 3 doctest，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：超越原始范围——EngineCommand 字段 u16→String（支持 Expr 插值），REG_MARKER(0xFF00) 区分池/寄存器，共享 RegisterAllocator 防碰撞，Menu fall-through 防护，`sub` 子例程语法（新增 SceneNode::Subroutine + PEG 规则 + 编译器重排+验证），run_project 项目运行器，4 场景多跳测试链（prologue→scene_a→scene_b→scene_c）。审查 15 条全部修复。文档同步：Architecture.md / Phase-1-Tasks.md / Roadmap.md / CLAUDE.md。
+
+**上下文交接**：
+- 关键决策：`sub` 子例程为独立 SceneNode 变体，Parser 直接产出，编译器重排到场景末尾+隐式 Jump 跳过；函数式调用 `name()` 仅能调用 `sub`；子例程内禁止 Jump/Goto；变量无作用域（全局 HashMap）；CALL 字节码预留 arg_count + args 字段为后续参数传递提供支持
+- 新增接口：`SceneNode::Subroutine { name, body }`、`EngineCommand` 所有文本字段 String 化、`REG_MARKER`/`is_reg`/`reg_from_marked`、`compile_expr_to_pool_or_reg` 支持寄存器模式
+- 已知限制：变量无作用域；Menu 条件选项未在 VM 端消费（需 SceneManager 配合）；instruction_size 表仍有两份不同签名（IrInstruction vs Opcode）
+- 建议下一个任务先读取：`scene.rs`(Subroutine 变体)、`compiler.rs`(generate_ir 重排)、`grammar.pest`(sub_def)、`statements.rs`(build_sub/防fall-through)
 
 ---
 ### PH1-T15 — 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现）

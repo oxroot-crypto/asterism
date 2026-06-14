@@ -1,6 +1,6 @@
 -- sakura_road.aster — 示例章节场景
 -- 第一章：樱花大道
--- 展示多场景跳转、旗标判断、goto/call 流程控制
+-- 展示多场景跳转、旗标判断、goto/函数式调用 流程控制
 
 scene "chapter1/sakura_road" {
     description: "第一章 — 樱花大道"
@@ -25,7 +25,7 @@ scene "chapter1/sakura_road" {
     -- goto — 无条件跳转到本场景内的标签
     --   不同于 jump（跳转到其他场景），goto 在同一场景内跳转
     -- ============================================================
-    goto "main_flow"
+    jump "main_flow"
 
     -- 此处的语句永远不会执行（goto 已跳过）
     -- 这里可以放置废弃的或分支路径的备用代码
@@ -33,23 +33,23 @@ scene "chapter1/sakura_road" {
     label "main_flow"
 
     show sayori at center with dissolve(0.5)
-    sayori emotion: "smile"
+    emotion sayori "smile"
 
     sayori "你看，今年的樱花特别漂亮呢。"
 
     -- 根据变量值展示不同对话
     if $affection_sayori >= 3 {
-        sayori emotion: "happy"
+        emotion sayori "happy"
         sayori "而且能和你一起看，我真的很开心。"
     }
 
     -- ============================================================
-    -- call / return — 子流程调用
-    --   call <label> — 跳转到标签并记录返回点
-    --   return — 返回到最近一次 call 的位置继续执行
+    -- 函数式调用 / return — 子流程调用
+    --   name() — 跳转到子例程并记录返回点（函数式调用语法）
+    --   return — 返回到最近一次调用的位置继续执行
     --   适用于可复用的演出片段（如"回忆闪回"、"转场动画"等）
     -- ============================================================
-    call "memory_flashback"
+    -- memory_flashback()
 
     -- return 后从这里继续执行
     narration "回忆结束，两人继续走在樱花大道上。"
@@ -65,32 +65,25 @@ scene "chapter1/sakura_road" {
     -- ============================================================
     -- 场景结束
     --   如果没有任何 jump，场景执行完毕后自动结束（返回标题画面）
-    --   要跳转到下一场景，使用: jump "chapter2/xxx"
+    --   要跳转到下一场景，使用: goto "chapter2/xxx"
     -- ============================================================
     narration "两人静静地站在樱花树下，任由花瓣轻轻飘落在肩头。"
     narration "——序章·完——"
 
     -- ============================================================
     -- 子流程：回忆闪回
-    --   在 label 之后定义，通过 call 调用
-    --   执行到 return 后回到 call 的下一条语句
+    --   通过 memory_flashback() 调用
+    --   执行到 return 后回到调用点的下一条语句
     -- ============================================================
-    label "memory_flashback"
-
-    se "se_memory_chime"
-
-    bg "bg_sakura_road_evening" with dissolve(1.0)
-    music "bgm_memory" fade_in: 0.8
-
-    narration "——那是很多年前的春天。"
-
-    show sayori emotion: "default"
-    sayori "我们约定好了哦，要一起看一辈子的樱花。"
-
-    narration "——那是儿时的约定。"
-
-    bg "bg_sakura_road_afternoon" with dissolve(1.0)
-    music "bgm_sakura_road" fade_in: 0.8
-
-    return
+    sub "memory_flashback" {
+        se "se_memory_chime"
+        bg "bg_sakura_road_evening" with dissolve(1.0)
+        music "bgm_memory" fade_in: 0.8
+        narration "——那是很多年前的春天。"
+        show sayori at center emotion: "default"
+        sayori "我们约定好了哦，要一起看一辈子的樱花。"
+        narration "——那是儿时的约定。"
+        bg "bg_sakura_road_afternoon" with dissolve(1.0)
+        music "bgm_sakura_road" fade_in: 0.8
+    }
 }

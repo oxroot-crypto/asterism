@@ -51,20 +51,20 @@ pub struct MenuChoiceData {
 pub enum VmAction {
     /// 等待用户输入（点击继续）。
     ///
-    /// 由 DIALOGUE 或 NARRATE 指令触发。
-    /// 调用方应先通过 VM 的相关方法获取对话/旁白详情，
-    /// 渲染完成后等待用户点击，然后继续调用 `step()`。
+    /// **设计说明**：Dialogue/Narrate 指令的实际返回值为 `Command(SetDialogue/SetNarration)`，
+    /// 而非 `WaitForInput`。SceneManager 收到渲染命令后自主决定何时暂停，待用户点击
+    /// 后再次调用 `step()`。此变体保留供未来 SceneManager 主动请求暂停的场景使用。
     WaitForInput,
 
     /// 显示选择支菜单，等待用户选择。
     ///
     /// 由 MENU 指令触发。
-    /// `prompt_idx` 是提示文本的常量池索引。
+    /// `prompt` 是提示文本的常量池索引。
     /// `choices` 包含所有可选项。
     /// 调用方渲染菜单，在用户选择后通过 VM 的接口设置选择结果并继续。
     ShowMenu {
-        /// 提示文本的常量池索引
-        prompt_idx: u16,
+        /// 已解析的提示文本
+        prompt: String,
         /// 选项列表
         choices: Vec<MenuChoiceData>,
     },
@@ -86,16 +86,8 @@ impl fmt::Display for VmAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VmAction::WaitForInput => write!(f, "WaitForInput"),
-            VmAction::ShowMenu {
-                prompt_idx,
-                choices,
-            } => {
-                write!(
-                    f,
-                    "ShowMenu(prompt_pool[{}], {} choices)",
-                    prompt_idx,
-                    choices.len()
-                )
+            VmAction::ShowMenu { prompt, choices } => {
+                write!(f, "ShowMenu(\"{}\", {} choices)", prompt, choices.len())
             }
             VmAction::SceneEnd => write!(f, "SceneEnd"),
             VmAction::Command(cmd) => write!(f, "Command({})", cmd),
@@ -112,7 +104,7 @@ mod tests {
     fn vm_action_all_variants_constructible() {
         let _ = VmAction::WaitForInput;
         let _ = VmAction::ShowMenu {
-            prompt_idx: 0,
+            prompt: String::new(),
             choices: vec![MenuChoiceData {
                 text_idx: 1,
                 target_offset: 10,
@@ -142,16 +134,16 @@ mod tests {
         ];
 
         let action = VmAction::ShowMenu {
-            prompt_idx: 42,
+            prompt: "42".into(),
             choices: choices.clone(),
         };
 
         if let VmAction::ShowMenu {
-            prompt_idx,
+            prompt,
             choices: stored,
         } = &action
         {
-            assert_eq!(*prompt_idx, 42);
+            assert_eq!(prompt.as_str(), "42");
             assert_eq!(stored.len(), 2);
             assert_eq!(stored[0].text_idx, 0);
             assert_eq!(stored[0].target_offset, 100);
@@ -168,12 +160,12 @@ mod tests {
             VmAction::WaitForInput,
             VmAction::SceneEnd,
             VmAction::Command(EngineCommand::SetBg {
-                asset_idx: 0,
+                asset: "bg.png".into(),
                 trans_kind_idx: 0xFFFF,
                 dur_reg: 0xFF,
             }),
             VmAction::ShowMenu {
-                prompt_idx: 0,
+                prompt: String::new(),
                 choices: vec![],
             },
         ];

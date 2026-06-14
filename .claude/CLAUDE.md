@@ -224,7 +224,8 @@ export async function checkSyntax(source: string): Promise<Diagnostic[]> {
 ### 2.3 .aster DSL 设计规范
 
 - 语法采用缩进敏感风格，缩进为 2 空格
-- 关键字使用英文小写（`scene` / `show` / `menu` / `if` / `jump` 等）
+- 关键字使用英文小写（`scene` / `show` / `menu` / `if` / `jump` / `sub` 等）
+- `sub "name" { ... }` 定义子例程，仅 `name()` 函数式调用可调用，主流程自动跳过
 - 字符串字面量使用双引号 `"`
 - 注释使用 `--` 前缀
 - 变量引用使用 `$` 前缀 (`$affection_score`)
@@ -469,6 +470,15 @@ pub enum SceneNode {
     /// - 当 choices 为空时，此为脚本错误
     Menu {
         choices: Vec<Choice>,
+    },
+
+    /// 子例程定义节点：`sub "name" { body }`，
+    /// 仅在被 `name()` 函数式调用时执行，主流程自动跳过。
+    /// - name: 子例程名（唯一标识，`name()` 调用的目标）
+    /// - body: 子例程体内的 SceneNode 列表
+    Subroutine {
+        name: String,
+        body: Vec<SceneNode>,
     },
     // ...
 }

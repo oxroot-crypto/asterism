@@ -1,0 +1,113 @@
+-- scene_a.aster — 主测试场景（从 prologue 跳入，可跳到 scene_b/scene_c）
+
+scene "scene_a" {
+    description: "PH1-T14 scene_a — 变量验证 + 条件/逻辑/算术/子例程"
+
+    $scene_a_visited = true
+    $score = 100
+    set %scene_a_flag
+
+    narration "── 到达 scene_a ──"
+
+    -- ══ 验证从 prologue 传入的跨场景变量 ══
+    if $entry_score == 100 {
+        narration "✅ scene_a: 跨场景 entry_score = " + $entry_score
+    } else {
+        narration "❌ scene_a: entry_score 丢失"
+    }
+
+    if %entry_flag {
+        narration "✅ scene_a: 跨场景 entry_flag 保持"
+    }
+
+    -- ══ 算术运算 ══
+    $a = 10
+    $b = 20
+    $sum = $a + $b
+    $diff = $b - $a
+
+    if $sum == 30 {
+        narration "✅ 算术 Add: " + $a + " + " + $b + " = " + $sum
+    }
+    if $diff == 10 {
+        narration "✅ 算术 Sub: " + $b + " - " + $a + " = " + $diff
+    }
+
+    -- ══ 字符串拼接 ══
+    $greeting = "你好, " + $player
+    narration "✅ 字符串拼接: " + $greeting
+
+    -- ══ 比较运算 ══
+    $cmp_lt = $a < $b
+    if $cmp_lt == true {
+        narration "✅ 比较: 10 < 20 = " + $cmp_lt
+    }
+
+    -- ══ 逻辑运算 ══
+    $logic_not = not false
+    if $logic_not == true {
+        narration "✅ 逻辑: not false = " + $logic_not
+    }
+
+    -- ══ 条件分支 ══
+    if $score >= 80 {
+        $ending_type = "excellent"
+        narration "✅ 条件: score >= 80 → " + $ending_type
+    } elif $score >= 50 {
+        $ending_type = "normal"
+    } else {
+        $ending_type = "bad"
+    }
+
+    -- ══ 旗标操作 ══
+    set %toggle_test
+    toggle %toggle_test
+    if %toggle_test {
+        narration "❌ Toggle 错误"
+    } else {
+        narration "✅ Toggle: true → false"
+    }
+    unset %toggle_test
+
+    -- ══ Jump 场景内跳转 ══
+    jump "jump_target"
+    narration "❌ Jump 失败"
+    label "jump_target"
+    narration "✅ Jump: 场景内跳转成功"
+
+    -- ══ Call/Return ══
+    greet()
+    narration "✅ Return: 子例程返回"
+    jump "goto_menu"
+
+    sub "greet" {
+        narration "   👋 子例程: Hello!"
+    }
+
+    -- ══ Goto 选择 ══
+    label "goto_menu"
+    set %go_alt
+
+    menu "scene_a — 下一步？" {
+        "→ scene_b（无label）" {
+            unset %go_alt
+        }
+        "→ scene_b（label: from_a）" {
+            set %go_alt
+        }
+        "→ scene_c" {
+            goto "scene_c"
+        }
+        "→ 回 prologue" {
+            goto "prologue" label: "main"
+        }
+    }
+
+    if %go_alt {
+        narration "🔀 Goto scene_b label: from_a"
+        goto "scene_b" label: "from_a"
+    } else {
+        narration "🔀 Goto scene_b（入口）"
+        goto "scene_b"
+    }
+}

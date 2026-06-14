@@ -65,6 +65,10 @@ pub struct Compiler {
 
     /// 自动生成内部标签的递增计数器（如 `@branch_then_0`）
     next_label_id: usize,
+
+    /// 下一个可用寄存器的起始编号 — 同一 SceneNode 内多个表达式共享，
+    /// 避免各 Expr 独立分配导致寄存器碰撞。
+    next_reg: u8,
 }
 
 impl Compiler {
@@ -378,12 +382,19 @@ impl Compiler {
                     self.collect_expr_strings(l);
                 }
             }
-            SceneNode::Call { target } => {
-                self.collect_expr_strings(target);
+            SceneNode::Call { name, args } => {
+                self.intern(name);
+                for arg in args {
+                    self.collect_expr_strings(arg);
+                }
             }
             SceneNode::Return => {}
             SceneNode::Label { name } => {
                 self.intern(name);
+            }
+            SceneNode::Subroutine { name, body } => {
+                self.intern(name);
+                self.collect_nodes_strings(body);
             }
         }
     }
@@ -395,7 +406,12 @@ impl Compiler {
                 self.intern(s);
             }
             Expr::Variable(name) => {
-                self.intern(name);
+                // 旗标引用保留 % 前缀，入库时去掉以确保与 SetFlag 等共用同一 pool 条目
+                if let Some(flag_name) = name.strip_prefix('%') {
+                    self.intern(flag_name);
+                } else {
+                    self.intern(name);
+                }
             }
             Expr::BinaryOp(left, _, right) => {
                 self.collect_expr_strings(left);
@@ -418,7 +434,9 @@ impl Compiler {
         }
         let idx = self.pool.len() as u16;
         self.pool.push(s.to_string());
-        self.pool_map.insert(s.to_string(), idx);
+        // 复用刚推入 pool 的 String 作为 HashMap 键，避免二次分配
+        let key = self.pool.last().expect("刚推入，必非空").clone();
+        self.pool_map.insert(key, idx);
         idx
     }
 
@@ -428,14 +446,47 @@ impl Compiler {
 
     /// 第二遍：遍历 SceneNode，生成 IR 指令序列。
     fn generate_ir(&mut self, scene: &Scene) {
-        self.compile_nodes(&scene.nodes);
-        // 始终以 End 指令结束场景
+        // 无子例程节点重排到场景末尾，主流程自动跳过
+        let sub_names: std::collections::HashSet<String> = scene
+            .nodes
+            .iter()
+            .filter_map(|n| {
+                if let SceneNode::Subroutine { name, .. } = n {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // 验证：Jump/Goto/Call 不能将非子例程 Label 作为目标（仅子例程名可用）
+        // 验证：子例程内部不能使用 Jump/Goto
+        for node in &scene.nodes {
+            Self::validate_node(node, &sub_names, &mut self.errors);
+        }
+
+        let (main_nodes, sub_nodes): (Vec<SceneNode>, Vec<SceneNode>) = scene
+            .nodes
+            .iter()
+            .cloned()
+            .partition(|n| !matches!(n, SceneNode::Subroutine { .. }));
+
+        self.compile_nodes(&main_nodes);
+        if !sub_nodes.is_empty() {
+            let skip = self.gen_label("sub_skip");
+            self.emit(IrInstruction::Jump {
+                target: skip.clone(),
+            });
+            self.compile_nodes(&sub_nodes);
+            self.emit(IrInstruction::Label { name: skip });
+        }
         self.emit(IrInstruction::End);
     }
 
     /// 递归编译 SceneNode 列表。
     fn compile_nodes(&mut self, nodes: &[SceneNode]) {
         for node in nodes {
+            self.next_reg = 0;
             self.compile_scene_node(node);
         }
     }
@@ -590,8 +641,6 @@ impl Compiler {
                     let text_idx = self.intern_with_expr(&choice.text);
                     let target = self.expr_to_label_name(&choice.target);
 
-                    // 处理条件选项：提取旗标名存入 condition_flag_idx
-                    // VM 在显示 Menu 时检查旗标决定是否显示该选项
                     let condition_flag_idx = if let Some(ref cond) = choice.condition {
                         self.extract_flag_from_condition(cond)
                     } else {
@@ -709,10 +758,15 @@ impl Compiler {
                     label_idx,
                 });
             }
-            SceneNode::Call { target } => {
-                let target_label = self.expr_to_label_name(target);
+            SceneNode::Call { name, args } => {
+                // 编译参数表达式到寄存器
+                let arg_regs: Vec<u8> = args
+                    .iter()
+                    .map(|arg| self.compile_expr_to_reg(arg))
+                    .collect();
                 self.emit(IrInstruction::Call {
-                    target: target_label,
+                    target: name.clone(),
+                    args: arg_regs,
                 });
             }
             SceneNode::Return => {
@@ -720,6 +774,12 @@ impl Compiler {
             }
             SceneNode::Label { name } => {
                 self.emit(IrInstruction::Label { name: name.clone() });
+            }
+            SceneNode::Subroutine { name, body } => {
+                // 子例程：Label + body，编译器已将其重排到场景末尾
+                self.emit(IrInstruction::Label { name: name.clone() });
+                self.compile_nodes(body);
+                self.emit(IrInstruction::Return);
             }
         }
     }
@@ -798,20 +858,18 @@ impl Compiler {
         let end_label = self.gen_label("branch_end");
         let then_label = self.gen_label("branch_then");
 
-        // if 条件
+        // if 条件 → JumpIf then
         let cond_reg = self.compile_expr_to_reg(condition);
         self.emit(IrInstruction::JumpIf {
             reg: cond_reg,
             target: then_label.clone(),
         });
 
-        // elif 分支
-        let mut elif_labels: Vec<(String, String)> = Vec::new(); // (check_label, then_label)
+        // elif 条件链 → fall-through + JumpIf elif_then
+        let mut elif_labels: Vec<(String, String)> = Vec::new();
         for (elif_cond, _) in elif_branches.iter() {
             let check_label = self.gen_label("branch_elif_check");
             let elif_then_label = self.gen_label("branch_elif_then");
-
-            // 跳转到 elif 检查（前一个条件为 false 时落在这里）
             self.emit(IrInstruction::Label {
                 name: check_label.clone(),
             });
@@ -820,71 +878,65 @@ impl Compiler {
                 reg: cond_reg,
                 target: elif_then_label.clone(),
             });
-
             elif_labels.push((check_label, elif_then_label));
         }
 
-        // 如果所有条件都为 false → else 或 end
-        if else_nodes.is_some() {
+        // 所有条件为 false → else（如果有）或 end
+        if let Some(else_nodes) = else_nodes {
             let else_label = self.gen_label("branch_else");
             self.emit(IrInstruction::Jump {
                 target: else_label.clone(),
             });
-            // 注意：下面的 JumpIf 目标（elif check labels）已经在上面 emit 了
-            // 这里继续往下会先到 then_label（由 JumpIf 跳转过来）
-
-            // then 分支
-            self.emit(IrInstruction::Label { name: then_label });
-            self.compile_nodes(then_nodes);
-            self.emit(IrInstruction::Jump {
-                target: end_label.clone(),
-            });
-
-            // elif 分支
-            for (idx, (_, elif_nodes)) in elif_branches.iter().enumerate() {
-                let (_, ref elif_then_label) = elif_labels[idx];
-                self.emit(IrInstruction::Label {
-                    name: elif_then_label.clone(),
-                });
-                self.compile_nodes(elif_nodes);
-                self.emit(IrInstruction::Jump {
-                    target: end_label.clone(),
-                });
-            }
-
+            self.emit_then_elif_branches(
+                then_label,
+                then_nodes,
+                &elif_labels,
+                elif_branches,
+                &end_label,
+            );
             // else 分支
             self.emit(IrInstruction::Label { name: else_label });
-            if let Some(nodes) = else_nodes {
-                self.compile_nodes(nodes);
-            }
+            self.compile_nodes(else_nodes);
         } else {
-            // 无 else 分支
             self.emit(IrInstruction::Jump {
                 target: end_label.clone(),
             });
-
-            // then 分支
-            self.emit(IrInstruction::Label { name: then_label });
-            self.compile_nodes(then_nodes);
-            self.emit(IrInstruction::Jump {
-                target: end_label.clone(),
-            });
-
-            // elif 分支
-            for (idx, (_, elif_nodes)) in elif_branches.iter().enumerate() {
-                let (_, ref elif_then_label) = elif_labels[idx];
-                self.emit(IrInstruction::Label {
-                    name: elif_then_label.clone(),
-                });
-                self.compile_nodes(elif_nodes);
-                self.emit(IrInstruction::Jump {
-                    target: end_label.clone(),
-                });
-            }
+            self.emit_then_elif_branches(
+                then_label,
+                then_nodes,
+                &elif_labels,
+                elif_branches,
+                &end_label,
+            );
         }
 
-        // 结束标签
         self.emit(IrInstruction::Label { name: end_label });
+    }
+
+    /// 发射 then 分支和所有 elif 分支的 IR 指令（compile_branch 的共享实现）。
+    fn emit_then_elif_branches(
+        &mut self,
+        then_label: String,
+        then_nodes: &[SceneNode],
+        elif_labels: &[(String, String)],
+        elif_branches: &[(Expr, Vec<SceneNode>)],
+        end_label: &str,
+    ) {
+        self.emit(IrInstruction::Label { name: then_label });
+        self.compile_nodes(then_nodes);
+        self.emit(IrInstruction::Jump {
+            target: end_label.to_string(),
+        });
+        for (idx, (_, elif_nodes)) in elif_branches.iter().enumerate() {
+            let (_, ref elif_then_label) = elif_labels[idx];
+            self.emit(IrInstruction::Label {
+                name: elif_then_label.clone(),
+            });
+            self.compile_nodes(elif_nodes);
+            self.emit(IrInstruction::Jump {
+                target: end_label.to_string(),
+            });
+        }
     }
 
     // ========================================================================
@@ -896,8 +948,10 @@ impl Compiler {
     /// 使用编译器内部的 RegisterAllocator 管理寄存器分配。
     /// 每次调用此方法前，寄存器分配器都被重置（从 r0 开始）。
     fn compile_expr_to_reg(&mut self, expr: &Expr) -> u8 {
-        let mut regs = RegisterAllocator::new();
-        self.compile_expr(expr, &mut regs)
+        let mut regs = RegisterAllocator::with_base(self.next_reg);
+        let result = self.compile_expr(expr, &mut regs);
+        self.next_reg = regs.next_reg(); // 推进全局寄存器计数器
+        result
     }
 
     /// 递归编译 Expr 树（核心方法）。
@@ -935,10 +989,19 @@ impl Compiler {
                 reg
             }
             Expr::Variable(name) => {
-                let name_idx = self.intern(name);
-                let reg = regs.allocate().expect("寄存器不足");
-                self.emit(IrInstruction::LoadVar { dst: reg, name_idx });
-                reg
+                if let Some(flag_name) = name.strip_prefix('%') {
+                    // 旗标引用 → CheckFlag
+                    let flag_idx = self.intern(flag_name);
+                    let reg = regs.allocate().expect("寄存器不足");
+                    self.emit(IrInstruction::CheckFlag { dst: reg, flag_idx });
+                    reg
+                } else {
+                    // 变量引用 → LoadVar
+                    let name_idx = self.intern(name);
+                    let reg = regs.allocate().expect("寄存器不足");
+                    self.emit(IrInstruction::LoadVar { dst: reg, name_idx });
+                    reg
+                }
             }
             Expr::BinaryOp(left, op, right) => {
                 // 先编译左右操作数
@@ -1039,21 +1102,109 @@ impl Compiler {
         if as_pool && let Some(s) = expr.as_string_literal() {
             return self.intern(s);
         }
-        // 回退：编译到寄存器，返回寄存器值作为 u16
         let reg = self.compile_expr_to_reg(expr);
-        reg as u16
+        if as_pool {
+            // 非字面量表达式 → 寄存器模式，置 REG_MARKER 位以区分常量池索引
+            crate::ir::REG_MARKER | (reg as u16)
+        } else {
+            // as_pool=false: 纯寄存器引用（如 x_reg、y_reg、scale_reg、alpha_reg、dur_reg 等），
+            // 这些字段从不需要常量池解析，直接以裸 u8 寄存器号编码。
+            // 调用方保证不会将返回值误解为池索引。
+            reg as u16
+        }
     }
 
     /// 从条件表达式中提取旗标名（v0.1 简化实现）。
     ///
     /// 如果条件是简单的 `Expr::Variable(name)`（如 `if %flag` 或 `if $bool_var`），
-    /// 返回对应的常量池索引，VM 在显示选项前检查该旗标/变量。
-    /// 对于复杂表达式条件（如 `$a >= 5`），返回 NONE_POOL（v0.1 暂不处理）。
+    /// 编译菜单选项条件表达式，返回条件旗标的常量池索引。
+    ///
+    /// - 简单 `%flag` → 直接返回旗标名的池索引
+    /// - 复杂表达式（`$a >= 5` 等）→ 编译为 Bool 寄存器 → SetFlag 到动态生成的内部旗标，
+    ///   返回该内部旗标的池索引
     fn extract_flag_from_condition(&mut self, cond: &Expr) -> u16 {
-        match cond {
-            Expr::Variable(name) => self.intern(name),
-            // v0.1 限制：复杂表达式条件暂不处理，VM 会将其视为"始终显示"
-            _ => NONE_POOL,
+        if let Expr::Variable(name) = cond
+            && let Some(flag_name) = name.strip_prefix('%')
+        {
+            return self.intern(flag_name);
+        }
+        // 变量引用（如 $bool_var）→ 编译为 Bool 值 → 存入内部旗标
+        // 复杂条件：编译表达式 → Bool 寄存器 → 存入动态旗标
+        let cond_reg = self.compile_expr_to_reg(cond);
+        let internal_flag = format!("@menu_cond_{}", self.next_label_id);
+        self.next_label_id += 1;
+        let flag_idx = self.intern(&internal_flag);
+        // 注意：Bool 寄存器值需要先存入变量，再在运行时由 VM 转为旗标。
+        // 当前简化实现：将寄存器值存入同名变量，SceneManager 通过变量名间接检查。
+        // v1.0 应改为 VM 端 CheckFlag 前先执行条件求值。
+        self.emit(IrInstruction::SetVar {
+            name_idx: flag_idx,
+            value_reg: cond_reg,
+        });
+        flag_idx
+    }
+
+    /// 递归验证节点树：子例程内禁止 Jump/Goto；Jump/Goto 不能以子例程名为目标。
+    #[allow(clippy::collapsible_if)]
+    fn validate_node(
+        node: &SceneNode,
+        sub_names: &std::collections::HashSet<String>,
+        errors: &mut Vec<CompileError>,
+    ) {
+        match node {
+            SceneNode::Jump { target } => {
+                if let Some(s) = target.as_string_literal() {
+                    if sub_names.contains(s) {
+                        errors.push(CompileError::without_position(
+                            format!(
+                                "不允许以子例程 \"{}\" 作为 Jump 目标，请使用函数式调用 {}()",
+                                s, s
+                            ),
+                            None::<&str>,
+                        ));
+                    }
+                }
+            }
+            SceneNode::Goto {
+                label: Some(target),
+                ..
+            } => {
+                if let Some(s) = target.as_string_literal() {
+                    if sub_names.contains(s) {
+                        errors.push(CompileError::without_position(
+                            format!(
+                                "不允许以子例程 \"{}\" 作为 Goto 目标，请使用函数式调用 {}()",
+                                s, s
+                            ),
+                            None::<&str>,
+                        ));
+                    }
+                }
+            }
+            SceneNode::Call { name, .. } if !sub_names.contains(name) => {
+                errors.push(CompileError::without_position(
+                    format!(
+                        "调用未定义的子例程 \"{}\"（请确认 sub \"{}\" 是否存在）",
+                        name, name
+                    ),
+                    None::<&str>,
+                ));
+            }
+            SceneNode::Subroutine { name, body } => {
+                // 子例程内禁止控制流跳转
+                for child in body {
+                    match child {
+                        SceneNode::Jump { .. } | SceneNode::Goto { .. } => {
+                            errors.push(CompileError::without_position(
+                                format!("子例程 \"{}\" 内不允许使用 Jump/Goto", name),
+                                None::<&str>,
+                            ));
+                        }
+                        _ => Self::validate_node(child, sub_names, errors),
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1062,15 +1213,17 @@ impl Compiler {
     /// 如果 Expr 是 StringLiteral 则提取字符串值；
     /// 如果是 Variable 则提取变量名；
     /// 否则用临时名。
-    fn expr_to_label_name(&self, expr: &Expr) -> String {
+    fn expr_to_label_name(&mut self, expr: &Expr) -> String {
         if let Some(s) = expr.as_string_literal() {
             return s.to_string();
         }
         if let Some(v) = expr.as_variable() {
             return format!("@var_{}", v);
         }
-        // 非字面量标签引用 — 这是运行时计算的跳转，使用内部标签名
-        format!("@dyn_jump_{}", self.next_label_id)
+        // 非字面量标签引用 — 运行时计算的跳转，生成唯一标签名
+        let id = self.next_label_id;
+        self.next_label_id += 1;
+        format!("@dyn_jump_{}", id)
     }
 
     // ========================================================================
@@ -1081,14 +1234,13 @@ impl Compiler {
     fn intern_with_expr(&mut self, expr: &Expr) -> u16 {
         if let Some(s) = expr.as_string_literal() {
             self.intern(s)
+        } else if let Some(v) = expr.as_variable() {
+            self.intern(v)
         } else {
-            // 非字符串字面量 → 后续 compile_expr 会生成 IR
-            // 这里返回一个占位索引（变量名）
-            if let Some(v) = expr.as_variable() {
-                self.intern(v)
-            } else {
-                NONE_POOL
-            }
+            // 复杂表达式（如字符串拼接）→ 编译到寄存器 + REG_MARKER，
+            // 与 compile_expr_to_pool_or_reg 保持一致
+            let reg = self.compile_expr_to_reg(expr);
+            crate::ir::REG_MARKER | (reg as u16)
         }
     }
 

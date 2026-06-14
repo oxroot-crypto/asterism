@@ -1,0 +1,57 @@
+-- scene_c.aster — 最终场景（多源入口 + 累计状态验证）
+
+scene "scene_c" {
+    description: "PH1-T14 scene_c — 最终场景，多源入口验证"
+
+    $scene_c_visited = true
+    set %scene_c_flag
+
+    -- ══ 入口（无 label）══
+    narration "── 到达 scene_c（入口）──"
+
+    narration "══ 累计状态汇总 ══"
+    narration "entry_score = " + $entry_score
+    narration "visit_count = " + $visit_count
+    if $scene_a_visited == true {
+        narration "  scene_a: 已访问 ✅"
+    }
+    if $scene_b_visited == true {
+        narration "  scene_b: 已访问 ✅"
+    }
+    if $scene_c_visited == true {
+        narration "  scene_c: 已访问 ✅（当前）"
+    }
+
+    -- 验证多层跳转的变量保持
+    if $entry_score == 100 and %entry_flag {
+        narration "✅ scene_c: 多跳后变量和旗标仍保持"
+    }
+
+    $visit_count = $visit_count + 1
+    narration "ℹ visit_count → " + $visit_count
+
+    -- ══ 条件分支：根据 visit_count 判断 ══
+    if $visit_count >= 5 {
+        narration "🎉 你已经访问了 " + $visit_count + " 个场景！"
+    } elif $visit_count >= 3 {
+        narration "📍 访问了 " + $visit_count + " 个场景，继续探索~"
+    } else {
+        narration "🔰 刚开始探索，visit_count = " + $visit_count
+    }
+
+    -- ══ 最后的选择 ══
+    menu "scene_c — 下一步？" {
+        "→ 回 prologue（从头开始）" {
+            goto "prologue" label: "main"
+        }
+        "→ scene_a" {
+            goto "scene_a"
+        }
+        "→ scene_b" {
+            goto "scene_b"
+        }
+        "→ scene_b（alternate_start）" {
+            goto "scene_b" label: "alternate_start"
+        }
+    }
+}

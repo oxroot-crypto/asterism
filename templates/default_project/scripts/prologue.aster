@@ -443,9 +443,9 @@ scene "prologue" {
     -- jump $jump_dest
 
     -- ==================================================================
-    -- §21 Call / Return — 子例程调用与返回
-    --      Call:   SceneNode::Call { target: Expr } — 压栈，跳转到标签
-    --      Return: SceneNode::Return — 弹栈，回到 Call 的下一条语句
+    -- §21 函数式调用 / Return — 子例程调用与返回
+    --      调用:   name() 或 name(arg1, arg2) — 压栈，跳转到子例程
+    --      Return: SceneNode::Return — 弹栈，回到调用点的下一条语句
     --      适用于可复用演出片段（回忆闪回/转场动画/公共序列）
     -- ==================================================================
 
@@ -453,8 +453,8 @@ scene "prologue" {
 
     narration "现在演示子例程调用——"
 
-    -- 21a) Call：调用子例程（target 支持变量）
-    call "flashback_subroutine"
+    -- 21a) 函数式调用子例程
+    flashback_subroutine()
 
     -- Return 后从这里继续
     narration "——子例程返回，继续主流程。"
@@ -462,24 +462,24 @@ scene "prologue" {
     jump "menu_demo"
 
     -- ── 子例程定义 ──────────────────────────────────────────────────
-    label "flashback_subroutine"
+    sub "flashback_subroutine" {
 
-    se "se_memory_chime"
-    bg "bg_sakura_road_evening" with dissolve(0.8)
-    music "bgm_memory" fade_in: 1.0
+      se "se_memory_chime"
+      bg "bg_sakura_road_evening" with dissolve(0.8)
+      music "bgm_memory" fade_in: 1.0
 
-    narration "【闪回】那是很多年前的约定——"
+      narration "【闪回】那是很多年前的约定——"
 
-    if %met_akane {
-        narration "小茜也在那里，笑得很灿烂。"
+      if %met_akane {
+          narration "小茜也在那里，笑得很灿烂。"
+      }
+
+      -- 还原场景
+      bg "bg_classroom_morning" with dissolve(0.8)
+      music "bgm_daily_life" fade_in: 1.0
+
+      -- 21b) Return：从子例程返回
     }
-
-    -- 还原场景
-    bg "bg_classroom_morning" with dissolve(0.8)
-    music "bgm_daily_life" fade_in: 1.0
-
-    -- 21b) Return：从子例程返回
-    return
 
     -- ==================================================================
     -- §22 Menu — 显示选择支，等待玩家选择

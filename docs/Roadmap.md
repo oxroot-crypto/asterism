@@ -89,7 +89,7 @@ Crates:      └─ 5 crates ─┘├─ +3 ──┤                          
 | 编号 | 任务 | 对应模块 | 对应需求 | 预估 | 交付物 | 验收标准 |
 |------|------|---------|---------|------|--------|---------|
 | T1-001 | 实现 `aster-platform` | `aster-platform` | NFR-COMPAT-001~003 | 8h | `Platform` trait + 3 平台实现 + 单元测试 | 三个平台均能正确返回用户目录和存档路径 |
-| T1-002 | 实现 `aster-core` 所有类型 | `aster-core` | REQ-ENG-003 | 12h | Game / Character / Scene / SceneNode / Asset / SaveData / Theme 等所有核心类型 + serde 派生 | 所有类型可序列化/反序列化，单元测试覆盖 |
+| T1-002 | 实现 `aster-core` 所有类型 | `aster-core` | REQ-ENG-003 | 12h | Game / Character / Scene / SceneNode(26 变体含 Subroutine) / Asset / SaveData / Theme 等所有核心类型 + serde 派生 | 所有类型可序列化/反序列化，单元测试覆盖 |
 | T1-003 | 实现 `aster-parser` — PEG 语法 + AST | `aster-parser` | REQ-ENG-001 | 16h | .aster PEG 语法文件 + AST 构建器 + 错误收集器 + 单元测试 | 有效脚本→AST、无效脚本→含行号的错误信息 |
 
 ### 3.3 任务 — 渲染管线（Week 4-7）

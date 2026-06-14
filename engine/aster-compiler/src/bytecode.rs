@@ -260,6 +260,108 @@ impl fmt::Display for Opcode {
 }
 
 // ============================================================================
+// 字节码解码辅助 — VM 侧公共 API（aster-vm::opcode 由此 re-export）
+// ============================================================================
+
+/// 返回指定操作码的字节码指令总长度（含 1 byte opcode + 变长操作数）。
+///
+/// Menu 和 Effect 为变长指令，此处返回 0（调用方需自行计算）。
+/// Label 是伪指令，不产生字节码，返回 0。
+pub fn instruction_size(opcode: Opcode) -> usize {
+    match opcode {
+        Opcode::PushStr => 4,
+        Opcode::PushInt => 10,
+        Opcode::PushFloat => 10,
+        Opcode::PushBool => 3,
+        Opcode::LoadVar => 4,
+        Opcode::StoreVar => 4,
+        Opcode::CheckFlag => 4,
+        Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div => 4,
+        Opcode::Eq | Opcode::Neq | Opcode::Lt | Opcode::Gt | Opcode::Le | Opcode::Ge => 4,
+        Opcode::And | Opcode::Or => 4,
+        Opcode::Not | Opcode::Neg => 3,
+        Opcode::Bg => 6,
+        Opcode::ShowChar => 11,
+        Opcode::ShowSprite => 10,
+        Opcode::MoveChar => 11,
+        Opcode::Emotion => 8,
+        Opcode::HideChar => 6,
+        Opcode::HideSprite => 6,
+        Opcode::Dialogue => 7,
+        Opcode::Narrate => 3,
+        Opcode::Menu => 0,
+        Opcode::Jump => 3,
+        Opcode::JumpIf => 4,
+        Opcode::JumpIfFlag => 5,
+        Opcode::Call => 0, // 变长: op(1) + target(2) + arg_count(1) + args(N)
+        Opcode::Return => 1,
+        Opcode::Label => 0,
+        Opcode::Goto => 5,
+        Opcode::SetVar => 4,
+        Opcode::SetFlag | Opcode::UnsetFlag | Opcode::ToggleFlag => 3,
+        Opcode::PlayBgm => 5,
+        Opcode::StopBgm => 2,
+        Opcode::PlaySe => 4,
+        Opcode::PlayVoice => 3,
+        Opcode::Effect => 0,
+        Opcode::Wait => 2,
+        Opcode::End => 1,
+    }
+}
+
+/// Menu 指令字节长度。
+pub fn menu_size(choice_count: usize) -> usize {
+    4 + choice_count * 6
+}
+
+/// Call 指令字节长度。
+/// 格式：op(1) + target_offset(2) + arg_count(1) + args(arg_count)
+pub fn call_size(arg_count: usize) -> usize {
+    4 + arg_count
+}
+
+/// Effect 指令字节长度。
+pub fn effect_size(param_count: usize) -> usize {
+    4 + param_count * 4
+}
+
+/// 从字节数组读取 little-endian u16（非推进式索引）。
+#[inline]
+pub fn read_u16(bytes: &[u8], pos: usize) -> u16 {
+    u16::from_le_bytes([bytes[pos], bytes[pos + 1]])
+}
+
+/// 从字节数组读取 little-endian i64（非推进式索引）。
+#[inline]
+pub fn read_i64(bytes: &[u8], pos: usize) -> i64 {
+    i64::from_le_bytes([
+        bytes[pos],
+        bytes[pos + 1],
+        bytes[pos + 2],
+        bytes[pos + 3],
+        bytes[pos + 4],
+        bytes[pos + 5],
+        bytes[pos + 6],
+        bytes[pos + 7],
+    ])
+}
+
+/// 从字节数组读取 little-endian f64（非推进式索引）。
+#[inline]
+pub fn read_f64(bytes: &[u8], pos: usize) -> f64 {
+    f64::from_le_bytes([
+        bytes[pos],
+        bytes[pos + 1],
+        bytes[pos + 2],
+        bytes[pos + 3],
+        bytes[pos + 4],
+        bytes[pos + 5],
+        bytes[pos + 6],
+        bytes[pos + 7],
+    ])
+}
+
+// ============================================================================
 // CompiledScene — 编译产物
 // ============================================================================
 
@@ -316,9 +418,9 @@ fn write_u16(buf: &mut Vec<u8>, value: u16) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// 从字节数组读取 little-endian u16。
-fn read_u16(bytes: &[u8], pos: &mut usize) -> u16 {
-    let v = u16::from_le_bytes([bytes[*pos], bytes[*pos + 1]]);
+/// 从字节数组读取 little-endian u16（推进式索引，内部用）。
+fn read_u16_advance(bytes: &[u8], pos: &mut usize) -> u16 {
+    let v = read_u16(bytes, *pos);
     *pos += 2;
     v
 }
@@ -328,18 +430,9 @@ fn write_i64(buf: &mut Vec<u8>, value: i64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// 从字节数组读取 little-endian i64。
-fn read_i64(bytes: &[u8], pos: &mut usize) -> i64 {
-    let v = i64::from_le_bytes([
-        bytes[*pos],
-        bytes[*pos + 1],
-        bytes[*pos + 2],
-        bytes[*pos + 3],
-        bytes[*pos + 4],
-        bytes[*pos + 5],
-        bytes[*pos + 6],
-        bytes[*pos + 7],
-    ]);
+/// 从字节数组读取 little-endian i64（推进式索引，内部用）。
+fn read_i64_advance(bytes: &[u8], pos: &mut usize) -> i64 {
+    let v = read_i64(bytes, *pos);
     *pos += 8;
     v
 }
@@ -349,18 +442,9 @@ fn write_f64(buf: &mut Vec<u8>, value: f64) {
     buf.extend_from_slice(&value.to_le_bytes());
 }
 
-/// 从字节数组读取 little-endian f64。
-fn read_f64(bytes: &[u8], pos: &mut usize) -> f64 {
-    let v = f64::from_le_bytes([
-        bytes[*pos],
-        bytes[*pos + 1],
-        bytes[*pos + 2],
-        bytes[*pos + 3],
-        bytes[*pos + 4],
-        bytes[*pos + 5],
-        bytes[*pos + 6],
-        bytes[*pos + 7],
-    ]);
+/// 从字节数组读取 little-endian f64（推进式索引，内部用）。
+fn read_f64_advance(bytes: &[u8], pos: &mut usize) -> f64 {
+    let v = read_f64(bytes, *pos);
     *pos += 8;
     v
 }
@@ -400,6 +484,10 @@ pub fn encode_instructions(
             IrInstruction::Label { .. } => {
                 // Label 是伪指令，不占字节（VM 不会执行到它）
             }
+            IrInstruction::Call { args, .. } => {
+                // op(1) + target_offset(2) + arg_count(1) + args
+                current_offset += 4 + args.len();
+            }
             IrInstruction::Menu { choices, .. } => {
                 // 头部：op(1) + prompt(2) + choice_count(1)
                 current_offset += 4;
@@ -413,7 +501,7 @@ pub fn encode_instructions(
                 current_offset += params.len() * 4;
             }
             _ => {
-                current_offset += instruction_size(inst);
+                current_offset += ir_instruction_size(inst);
             }
         }
     }
@@ -475,7 +563,7 @@ pub fn encode_instructions(
 /// 返回单条 IR 指令编码后的字节长度（可变长指令除外）。
 ///
 /// 用于 Pass 1 的偏移计算。
-fn instruction_size(inst: &IrInstruction) -> usize {
+fn ir_instruction_size(inst: &IrInstruction) -> usize {
     match inst {
         IrInstruction::PushStr { .. } => 4,
         IrInstruction::PushInt { .. } => 10,
@@ -506,7 +594,8 @@ fn instruction_size(inst: &IrInstruction) -> usize {
         IrInstruction::HideSprite { .. } => 6,
         IrInstruction::Dialogue { .. } => 7,
         IrInstruction::Narrate { .. } => 3,
-        IrInstruction::Jump { .. } | IrInstruction::Call { .. } => 3,
+        IrInstruction::Jump { .. } => 3,
+        IrInstruction::Call { .. } => 0, // 变长
         IrInstruction::JumpIf { .. } => 4,
         IrInstruction::JumpIfFlag { .. } => 5,
         IrInstruction::Return => 1,
@@ -790,10 +879,14 @@ fn encode_instruction(inst: &IrInstruction, label_map: &HashMap<String, usize>, 
             let offset = label_map.get(target).copied().unwrap_or(0);
             write_u16(buf, offset as u16);
         }
-        IrInstruction::Call { target } => {
+        IrInstruction::Call { target, args } => {
             buf.push(Opcode::Call as u8);
             let offset = label_map.get(target).copied().unwrap_or(0);
             write_u16(buf, offset as u16);
+            buf.push(args.len() as u8);
+            for reg in args {
+                buf.push(*reg);
+            }
         }
         IrInstruction::Return => {
             buf.push(Opcode::Return as u8);
@@ -897,19 +990,19 @@ pub fn decode_instructions(
             Opcode::PushStr => {
                 let reg = bytes[pos];
                 pos += 1;
-                let str_idx = read_u16(bytes, &mut pos);
+                let str_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::PushStr { reg, str_idx }
             }
             Opcode::PushInt => {
                 let reg = bytes[pos];
                 pos += 1;
-                let value = read_i64(bytes, &mut pos);
+                let value = read_i64_advance(bytes, &mut pos);
                 IrInstruction::PushInt { reg, value }
             }
             Opcode::PushFloat => {
                 let reg = bytes[pos];
                 pos += 1;
-                let value = read_f64(bytes, &mut pos);
+                let value = read_f64_advance(bytes, &mut pos);
                 IrInstruction::PushFloat { reg, value }
             }
             Opcode::PushBool => {
@@ -922,11 +1015,11 @@ pub fn decode_instructions(
             Opcode::LoadVar => {
                 let dst = bytes[pos];
                 pos += 1;
-                let name_idx = read_u16(bytes, &mut pos);
+                let name_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::LoadVar { dst, name_idx }
             }
             Opcode::StoreVar => {
-                let name_idx = read_u16(bytes, &mut pos);
+                let name_idx = read_u16_advance(bytes, &mut pos);
                 let src = bytes[pos];
                 pos += 1;
                 IrInstruction::StoreVar { name_idx, src }
@@ -934,7 +1027,7 @@ pub fn decode_instructions(
             Opcode::CheckFlag => {
                 let dst = bytes[pos];
                 pos += 1;
-                let flag_idx = read_u16(bytes, &mut pos);
+                let flag_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::CheckFlag { dst, flag_idx }
             }
             Opcode::Add => {
@@ -1060,8 +1153,8 @@ pub fn decode_instructions(
                 IrInstruction::Neg { dst, src }
             }
             Opcode::Bg => {
-                let asset_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::Bg {
@@ -1071,7 +1164,7 @@ pub fn decode_instructions(
                 }
             }
             Opcode::ShowChar => {
-                let char_idx = read_u16(bytes, &mut pos);
+                let char_idx = read_u16_advance(bytes, &mut pos);
                 let pos_byte = bytes[pos];
                 pos += 1;
                 let x_reg = bytes[pos];
@@ -1085,8 +1178,8 @@ pub fn decode_instructions(
                     0x03 => PositionEncoding::Custom { x_reg, y_reg },
                     _ => return Err(format!("非法的 Position 编码: 0x{:02X}", pos_byte)),
                 };
-                let emotion_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let emotion_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::ShowChar {
@@ -1098,7 +1191,7 @@ pub fn decode_instructions(
                 }
             }
             Opcode::ShowSprite => {
-                let asset_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
                 let x_reg = bytes[pos];
                 pos += 1;
                 let y_reg = bytes[pos];
@@ -1107,7 +1200,7 @@ pub fn decode_instructions(
                 pos += 1;
                 let alpha_reg = bytes[pos];
                 pos += 1;
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::ShowSprite {
@@ -1121,7 +1214,7 @@ pub fn decode_instructions(
                 }
             }
             Opcode::MoveChar => {
-                let char_idx = read_u16(bytes, &mut pos);
+                let char_idx = read_u16_advance(bytes, &mut pos);
                 let pos_byte = bytes[pos];
                 pos += 1;
                 let x_reg = bytes[pos];
@@ -1135,8 +1228,8 @@ pub fn decode_instructions(
                     0x03 => PositionEncoding::Custom { x_reg, y_reg },
                     _ => return Err(format!("非法的 Position 编码: 0x{:02X}", pos_byte)),
                 };
-                let emotion_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let emotion_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::MoveChar {
@@ -1148,9 +1241,9 @@ pub fn decode_instructions(
                 }
             }
             Opcode::Emotion => {
-                let char_idx = read_u16(bytes, &mut pos);
-                let emotion_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let char_idx = read_u16_advance(bytes, &mut pos);
+                let emotion_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::Emotion {
@@ -1161,8 +1254,8 @@ pub fn decode_instructions(
                 }
             }
             Opcode::HideChar => {
-                let char_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let char_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::HideChar {
@@ -1172,8 +1265,8 @@ pub fn decode_instructions(
                 }
             }
             Opcode::HideSprite => {
-                let asset_idx = read_u16(bytes, &mut pos);
-                let trans_kind_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
+                let trans_kind_idx = read_u16_advance(bytes, &mut pos);
                 let dur_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::HideSprite {
@@ -1183,9 +1276,9 @@ pub fn decode_instructions(
                 }
             }
             Opcode::Dialogue => {
-                let speaker_idx = read_u16(bytes, &mut pos);
-                let text_idx = read_u16(bytes, &mut pos);
-                let voice_idx = read_u16(bytes, &mut pos);
+                let speaker_idx = read_u16_advance(bytes, &mut pos);
+                let text_idx = read_u16_advance(bytes, &mut pos);
+                let voice_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::Dialogue {
                     speaker_idx,
                     text_idx,
@@ -1193,18 +1286,18 @@ pub fn decode_instructions(
                 }
             }
             Opcode::Narrate => {
-                let text_idx = read_u16(bytes, &mut pos);
+                let text_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::Narrate { text_idx }
             }
             Opcode::Menu => {
-                let prompt_idx = read_u16(bytes, &mut pos);
+                let prompt_idx = read_u16_advance(bytes, &mut pos);
                 let choice_count = bytes[pos] as usize;
                 pos += 1;
                 let mut choices = Vec::with_capacity(choice_count);
                 for _ in 0..choice_count {
-                    let text_idx = read_u16(bytes, &mut pos);
-                    let _target_offset = read_u16(bytes, &mut pos);
-                    let _cond_flag_idx = read_u16(bytes, &mut pos);
+                    let text_idx = read_u16_advance(bytes, &mut pos);
+                    let _target_offset = read_u16_advance(bytes, &mut pos);
+                    let _cond_flag_idx = read_u16_advance(bytes, &mut pos);
                     choices.push(ChoiceData {
                         text_idx,
                         target: String::new(), // 解码时无法恢复标签名
@@ -1217,7 +1310,7 @@ pub fn decode_instructions(
                 }
             }
             Opcode::Jump => {
-                let _offset = read_u16(bytes, &mut pos);
+                let _offset = read_u16_advance(bytes, &mut pos);
                 IrInstruction::Jump {
                     target: String::new(),
                 }
@@ -1225,24 +1318,32 @@ pub fn decode_instructions(
             Opcode::JumpIf => {
                 let reg = bytes[pos];
                 pos += 1;
-                let _offset = read_u16(bytes, &mut pos);
+                let _offset = read_u16_advance(bytes, &mut pos);
                 IrInstruction::JumpIf {
                     reg,
                     target: String::new(),
                 }
             }
             Opcode::JumpIfFlag => {
-                let flag_idx = read_u16(bytes, &mut pos);
-                let _offset = read_u16(bytes, &mut pos);
+                let flag_idx = read_u16_advance(bytes, &mut pos);
+                let _offset = read_u16_advance(bytes, &mut pos);
                 IrInstruction::JumpIfFlag {
                     flag_idx,
                     target: String::new(),
                 }
             }
             Opcode::Call => {
-                let _offset = read_u16(bytes, &mut pos);
+                let _offset = read_u16_advance(bytes, &mut pos);
+                let arg_count = bytes[pos] as usize;
+                pos += 1;
+                let mut args = Vec::with_capacity(arg_count);
+                for _ in 0..arg_count {
+                    args.push(bytes[pos]);
+                    pos += 1;
+                }
                 IrInstruction::Call {
                     target: String::new(),
+                    args,
                 }
             }
             Opcode::Return => IrInstruction::Return,
@@ -1251,15 +1352,15 @@ pub fn decode_instructions(
                 IrInstruction::Return // fallback
             }
             Opcode::Goto => {
-                let scene_idx = read_u16(bytes, &mut pos);
-                let label_idx = read_u16(bytes, &mut pos);
+                let scene_idx = read_u16_advance(bytes, &mut pos);
+                let label_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::Goto {
                     scene_idx,
                     label_idx,
                 }
             }
             Opcode::SetVar => {
-                let name_idx = read_u16(bytes, &mut pos);
+                let name_idx = read_u16_advance(bytes, &mut pos);
                 let value_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::SetVar {
@@ -1268,19 +1369,19 @@ pub fn decode_instructions(
                 }
             }
             Opcode::SetFlag => {
-                let flag_idx = read_u16(bytes, &mut pos);
+                let flag_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::SetFlag { flag_idx }
             }
             Opcode::UnsetFlag => {
-                let flag_idx = read_u16(bytes, &mut pos);
+                let flag_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::UnsetFlag { flag_idx }
             }
             Opcode::ToggleFlag => {
-                let flag_idx = read_u16(bytes, &mut pos);
+                let flag_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::ToggleFlag { flag_idx }
             }
             Opcode::PlayBgm => {
-                let asset_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
                 let fade_reg = bytes[pos];
                 pos += 1;
                 let looping = bytes[pos] != 0;
@@ -1297,7 +1398,7 @@ pub fn decode_instructions(
                 IrInstruction::StopBgm { fade_reg }
             }
             Opcode::PlaySe => {
-                let asset_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
                 let fade_reg = bytes[pos];
                 pos += 1;
                 IrInstruction::PlaySe {
@@ -1306,17 +1407,17 @@ pub fn decode_instructions(
                 }
             }
             Opcode::PlayVoice => {
-                let asset_idx = read_u16(bytes, &mut pos);
+                let asset_idx = read_u16_advance(bytes, &mut pos);
                 IrInstruction::PlayVoice { asset_idx }
             }
             Opcode::Effect => {
-                let type_idx = read_u16(bytes, &mut pos);
+                let type_idx = read_u16_advance(bytes, &mut pos);
                 let param_count = bytes[pos] as usize;
                 pos += 1;
                 let mut params = Vec::with_capacity(param_count);
                 for _ in 0..param_count {
-                    let key_idx = read_u16(bytes, &mut pos);
-                    let value_reg = read_u16(bytes, &mut pos);
+                    let key_idx = read_u16_advance(bytes, &mut pos);
+                    let value_reg = read_u16_advance(bytes, &mut pos);
                     params.push((key_idx, value_reg));
                 }
                 IrInstruction::Effect { type_idx, params }

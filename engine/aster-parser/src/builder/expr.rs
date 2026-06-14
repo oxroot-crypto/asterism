@@ -202,8 +202,8 @@ pub fn build_primary(pair: &Pair<Rule>, source: &str) -> Result<Expr, ParseError
             Ok(Expr::variable(name))
         }
         Rule::flag_ref => {
-            let name = pair.as_str().strip_prefix('%').unwrap_or(pair.as_str());
-            Ok(Expr::variable(name)) // 旗标在 Expr 中映射为 Variable
+            // 保留 % 前缀，方便 compiler 区分 Expr::Variable 中的变量引用与旗标引用
+            Ok(Expr::variable(pair.as_str()))
         }
         Rule::identifier => Ok(Expr::string_literal(pair.as_str())), // 裸标识符 → 隐式字符串
         // 括号表达式："(" ~ expr ~ ")" —— primary 为静默规则，括号被消费，留下 expr

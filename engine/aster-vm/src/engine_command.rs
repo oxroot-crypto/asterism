@@ -2,8 +2,9 @@
 //!
 //! 文件路径：engine/aster-vm/src/engine_command.rs
 //! 功能概述：引擎命令枚举 — 定义 VM 向上层（SceneManager/渲染器/音频系统）
-//!           发出的所有渲染和音频操作命令。所有字段使用常量池索引（u16）
-//!           或寄存器索引（u8），由上层解析为具体资源路径或值。
+//!           发出的所有渲染和音频操作命令。
+//!           文本/名称/路径字段为已解析的 `String`（VM 内部已从常量池或寄存器取值），
+//!           寄存器索引字段（`dur_reg`、`fade_reg` 等）由上层通过 VM 接口获取实际值。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-14
 //! 最后修改：2026-06-14
@@ -15,9 +16,9 @@ use std::fmt;
 
 /// 引擎命令枚举 — VM 执行渲染/音频指令时发出的操作命令。
 ///
-/// 所有资源标识符（asset_id、char_id、emotion 等）使用常量池索引（u16），
-/// 由 SceneManager 结合 `CompiledScene.constant_pool` 解析为具体字符串。
-/// 寄存器索引（dur_reg、fade_reg 等）指向 VM 的 `registers` 数组，
+/// 所有文本/名称/路径字段已由 VM 在指令执行时解析为 `String`
+///（支持常量池索引和寄存器两种来源，通过 `REG_MARKER` 位区分）。
+/// 寄存器索引字段（`dur_reg`、`fade_reg` 等）指向 VM 的 `registers` 数组，
 /// SceneManager 通过 VM 的只读接口获取实际值。
 ///
 /// # 变体分类
@@ -39,48 +40,48 @@ use std::fmt;
 /// | 媒体 | `PlayVoice` | 播放语音 |
 /// | 时序 | `Wait` | 等待指定时长 |
 /// | 特效 | `Effect` | 触发画面特效 |
+/// | 跳转 | `Goto` | 跨场景跳转 |
 /// | 错误 | `Error` | VM 运行时错误 |
 #[derive(Debug, Clone, PartialEq)]
 pub enum EngineCommand {
     /// 切换背景图片
     ///
-    /// - `asset_idx`：背景资源路径的常量池索引
+    /// - `asset`：已解析的背景资源路径
     /// - `trans_kind_idx`：转场类型名的常量池索引（`0xFFFF` = 无转场）
     /// - `dur_reg`：转场持续时长的寄存器（`0xFF` = 默认时长）
     SetBg {
-        asset_idx: u16,
+        asset: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 显示/重新出场角色立绘
     ///
-    /// - `char_idx`：角色 ID 的常量池索引
+    /// - `char`：已解析的角色 ID
     /// - `pos_byte`：立绘位置编码（0=Left, 1=Center, 2=Right, 3=Custom）
-    /// - `x_reg`：Custom 位置的 X 坐标寄存器（`0xFF` = 非 Custom 位置）
-    /// - `y_reg`：Custom 位置的 Y 坐标寄存器（`0xFF` = 非 Custom 位置）
-    /// - `emotion_idx`：表情名的常量池索引（`0xFFFF` = 默认表情）
+    /// - `x_reg` / `y_reg`：Custom 位置的坐标寄存器（`0xFF` = 非 Custom）
+    /// - `emotion`：已解析的表情名（空字符串 = 默认表情）
     /// - `trans_kind_idx`：入场转场类型（`0xFFFF` = 无转场）
     /// - `dur_reg`：转场持续时长的寄存器（`0xFF` = 默认）
     ShowChar {
-        char_idx: u16,
+        char: String,
         pos_byte: u8,
         x_reg: u8,
         y_reg: u8,
-        emotion_idx: u16,
+        emotion: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 显示独立精灵图片
     ///
-    /// - `asset_idx`：图片资源路径的常量池索引
+    /// - `asset`：已解析的图片资源路径
     /// - `x_reg` / `y_reg`：归一化坐标的寄存器
     /// - `scale_reg` / `alpha_reg`：缩放/透明度的寄存器
     /// - `trans_kind_idx`：入场转场类型（`0xFFFF` = 无转场）
     /// - `dur_reg`：转场持续时长的寄存器（`0xFF` = 默认）
     ShowSprite {
-        asset_idx: u16,
+        asset: String,
         x_reg: u8,
         y_reg: u8,
         scale_reg: u8,
@@ -91,80 +92,80 @@ pub enum EngineCommand {
 
     /// 平滑移动角色立绘
     ///
-    /// - `char_idx`：角色 ID 的常量池索引
+    /// - `char`：已解析的角色 ID
     /// - `pos_byte`：目标位置编码
     /// - `x_reg` / `y_reg`：Custom 位置的坐标寄存器
-    /// - `emotion_idx`：可选的新表情（`0xFFFF` = 保持现有）
+    /// - `emotion`：已解析的新表情（空字符串 = 保持现有）
     /// - `trans_kind_idx`：移动动画类型
     /// - `dur_reg`：移动时长的寄存器
     MoveChar {
-        char_idx: u16,
+        char: String,
         pos_byte: u8,
         x_reg: u8,
         y_reg: u8,
-        emotion_idx: u16,
+        emotion: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 原地切换角色立绘表情
     ///
-    /// - `char_idx`：角色 ID 的常量池索引
-    /// - `emotion_idx`：新表情名的常量池索引
+    /// - `char`：已解析的角色 ID
+    /// - `emotion`：已解析的新表情名
     /// - `trans_kind_idx`：切换动画类型（`0xFFFF` = 无动画）
     /// - `dur_reg`：切换时长的寄存器（`0xFF` = 默认）
     Emotion {
-        char_idx: u16,
-        emotion_idx: u16,
+        char: String,
+        emotion: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 隐藏角色立绘
     ///
-    /// - `char_idx`：角色 ID 的常量池索引
+    /// - `char`：已解析的角色 ID
     /// - `trans_kind_idx`：退场转场类型（`0xFFFF` = 无转场）
     /// - `dur_reg`：转场持续时长的寄存器（`0xFF` = 默认）
     HideChar {
-        char_idx: u16,
+        char: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 隐藏独立精灵
     ///
-    /// - `asset_idx`：图片资源路径的常量池索引
+    /// - `asset`：已解析的图片资源路径
     /// - `trans_kind_idx`：退场转场类型（`0xFFFF` = 无转场）
     /// - `dur_reg`：转场持续时长的寄存器（`0xFF` = 默认）
     HideSprite {
-        asset_idx: u16,
+        asset: String,
         trans_kind_idx: u16,
         dur_reg: u8,
     },
 
     /// 显示角色对话（含可选语音）
     ///
-    /// - `speaker_idx`：说话者名称的常量池索引
-    /// - `text_idx`：对话文本的常量池索引
-    /// - `voice_idx`：语音文件 ID 的常量池索引（`0xFFFF` = 无语音）
+    /// - `speaker`：已解析的说话者名称
+    /// - `text`：已解析的对话文本
+    /// - `voice`：已解析的语音文件路径（空字符串 = 无语音）
     SetDialogue {
-        speaker_idx: u16,
-        text_idx: u16,
-        voice_idx: u16,
+        speaker: String,
+        text: String,
+        voice: String,
     },
 
     /// 显示旁白文本（无说话者）
     ///
-    /// - `text_idx`：旁白文本的常量池索引
-    SetNarration { text_idx: u16 },
+    /// - `text`：已解析的旁白文本
+    SetNarration { text: String },
 
     /// 播放/切换背景音乐
     ///
-    /// - `asset_idx`：BGM 资源路径的常量池索引
+    /// - `asset`：已解析的 BGM 资源路径
     /// - `fade_reg`：淡入时长的寄存器（`0xFF` = 无淡入/默认）
     /// - `looping`：是否循环播放
     PlayBgm {
-        asset_idx: u16,
+        asset: String,
         fade_reg: u8,
         looping: bool,
     },
@@ -176,14 +177,14 @@ pub enum EngineCommand {
 
     /// 播放音效（不阻断 VM 执行）
     ///
-    /// - `asset_idx`：音效资源路径的常量池索引
+    /// - `asset`：已解析的音效资源路径
     /// - `fade_reg`：淡入时长的寄存器（`0xFF` = 无淡入）
-    PlaySe { asset_idx: u16, fade_reg: u8 },
+    PlaySe { asset: String, fade_reg: u8 },
 
     /// 播放语音（通常伴随 Dialogue）
     ///
-    /// - `asset_idx`：语音资源路径的常量池索引
-    PlayVoice { asset_idx: u16 },
+    /// - `asset`：已解析的语音资源路径
+    PlayVoice { asset: String },
 
     /// 暂停指定时长
     ///
@@ -192,12 +193,18 @@ pub enum EngineCommand {
 
     /// 触发画面特效
     ///
-    /// - `type_idx`：特效类型标识的常量池索引
-    /// - `params`：特效参数键值对（常量池索引, 寄存器引用）
+    /// - `effect_type`：已解析的特效类型标识
+    /// - `params`：特效参数（已解析的键, 寄存器引用）
     Effect {
-        type_idx: u16,
-        params: Vec<(u16, u16)>,
+        effect_type: String,
+        params: Vec<(String, u16)>,
     },
+
+    /// 跨场景跳转
+    ///
+    /// - `scene`：已解析的目标场景 ID
+    /// - `label`：已解析的目标标签名（空字符串 = 场景入口）
+    Goto { scene: String, label: String },
 
     /// VM 运行时错误
     ///
@@ -209,79 +216,70 @@ pub enum EngineCommand {
 impl fmt::Display for EngineCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EngineCommand::SetBg { asset_idx, .. } => {
-                write!(f, "SetBg(asset_pool[{}])", asset_idx)
+            EngineCommand::SetBg { asset, .. } => {
+                write!(f, "SetBg(\"{}\")", asset)
             }
             EngineCommand::ShowChar {
-                char_idx,
+                char,
                 pos_byte,
-                emotion_idx,
+                emotion,
                 ..
             } => {
                 write!(
                     f,
-                    "ShowChar(char_pool[{}], pos={}, emo_pool[{}])",
-                    char_idx, pos_byte, emotion_idx
+                    "ShowChar(\"{}\", pos={}, emo=\"{}\")",
+                    char, pos_byte, emotion
                 )
             }
-            EngineCommand::ShowSprite { asset_idx, .. } => {
-                write!(f, "ShowSprite(asset_pool[{}])", asset_idx)
+            EngineCommand::ShowSprite { asset, .. } => {
+                write!(f, "ShowSprite(\"{}\")", asset)
             }
-            EngineCommand::MoveChar {
-                char_idx, pos_byte, ..
-            } => {
-                write!(f, "MoveChar(char_pool[{}], pos={})", char_idx, pos_byte)
+            EngineCommand::MoveChar { char, pos_byte, .. } => {
+                write!(f, "MoveChar(\"{}\", pos={})", char, pos_byte)
             }
-            EngineCommand::Emotion {
-                char_idx,
-                emotion_idx,
-                ..
-            } => {
-                write!(
-                    f,
-                    "Emotion(char_pool[{}], emo_pool[{}])",
-                    char_idx, emotion_idx
-                )
+            EngineCommand::Emotion { char, emotion, .. } => {
+                write!(f, "Emotion(\"{}\", emo=\"{}\")", char, emotion)
             }
-            EngineCommand::HideChar { char_idx, .. } => {
-                write!(f, "HideChar(char_pool[{}])", char_idx)
+            EngineCommand::HideChar { char, .. } => {
+                write!(f, "HideChar(\"{}\")", char)
             }
-            EngineCommand::HideSprite { asset_idx, .. } => {
-                write!(f, "HideSprite(asset_pool[{}])", asset_idx)
+            EngineCommand::HideSprite { asset, .. } => {
+                write!(f, "HideSprite(\"{}\")", asset)
             }
-            EngineCommand::SetDialogue {
-                speaker_idx,
-                text_idx,
-                ..
-            } => {
-                write!(
-                    f,
-                    "SetDialogue(speaker_pool[{}], text_pool[{}])",
-                    speaker_idx, text_idx
-                )
+            EngineCommand::SetDialogue { speaker, text, .. } => {
+                write!(f, "SetDialogue(\"{}\" → \"{}\")", speaker, text)
             }
-            EngineCommand::SetNarration { text_idx } => {
-                write!(f, "SetNarration(text_pool[{}])", text_idx)
+            EngineCommand::SetNarration { text } => {
+                let display = if text.len() > 60 {
+                    format!("{}...", &text[..57])
+                } else {
+                    text.clone()
+                };
+                write!(f, "SetNarration(\"{}\")", display)
             }
-            EngineCommand::PlayBgm {
-                asset_idx, looping, ..
-            } => {
-                write!(f, "PlayBgm(asset_pool[{}], loop={})", asset_idx, looping)
+            EngineCommand::PlayBgm { asset, looping, .. } => {
+                write!(f, "PlayBgm(\"{}\", loop={})", asset, looping)
             }
             EngineCommand::StopBgm { .. } => {
                 write!(f, "StopBgm")
             }
-            EngineCommand::PlaySe { asset_idx, .. } => {
-                write!(f, "PlaySe(asset_pool[{}])", asset_idx)
+            EngineCommand::PlaySe { asset, .. } => {
+                write!(f, "PlaySe(\"{}\")", asset)
             }
-            EngineCommand::PlayVoice { asset_idx } => {
-                write!(f, "PlayVoice(asset_pool[{}])", asset_idx)
+            EngineCommand::PlayVoice { asset } => {
+                write!(f, "PlayVoice(\"{}\")", asset)
             }
             EngineCommand::Wait { dur_reg } => {
                 write!(f, "Wait(r{})", dur_reg)
             }
-            EngineCommand::Effect { type_idx, params } => {
-                write!(f, "Effect(pool[{}], {} params)", type_idx, params.len())
+            EngineCommand::Effect {
+                effect_type,
+                params,
+            } => {
+                write!(f, "Effect(\"{}\", {} params)", effect_type, params.len())
+            }
+            EngineCommand::Goto { scene, label } => {
+                write!(f, "Goto(scene=\"{}\", label=\"{}\")", scene, label)
             }
             EngineCommand::Error { message } => {
                 write!(f, "Error({})", message)
@@ -298,21 +296,21 @@ mod tests {
     #[test]
     fn engine_command_all_variants_constructible() {
         let _ = EngineCommand::SetBg {
-            asset_idx: 0,
+            asset: "bg.png".into(),
             trans_kind_idx: 0xFFFF,
             dur_reg: 0xFF,
         };
         let _ = EngineCommand::ShowChar {
-            char_idx: 0,
+            char: "sayori".into(),
             pos_byte: 1,
             x_reg: 0xFF,
             y_reg: 0xFF,
-            emotion_idx: 1,
+            emotion: "smile".into(),
             trans_kind_idx: 0xFFFF,
             dur_reg: 0xFF,
         };
         let _ = EngineCommand::ShowSprite {
-            asset_idx: 0,
+            asset: "icon.png".into(),
             x_reg: 1,
             y_reg: 2,
             scale_reg: 3,
@@ -321,51 +319,59 @@ mod tests {
             dur_reg: 0xFF,
         };
         let _ = EngineCommand::MoveChar {
-            char_idx: 0,
+            char: "akane".into(),
             pos_byte: 0,
             x_reg: 0xFF,
             y_reg: 0xFF,
-            emotion_idx: 0xFFFF,
+            emotion: String::new(),
             trans_kind_idx: 1,
             dur_reg: 2,
         };
         let _ = EngineCommand::Emotion {
-            char_idx: 0,
-            emotion_idx: 1,
+            char: "sayori".into(),
+            emotion: "happy".into(),
             trans_kind_idx: 0xFFFF,
             dur_reg: 0xFF,
         };
         let _ = EngineCommand::HideChar {
-            char_idx: 0,
+            char: "sayori".into(),
             trans_kind_idx: 1,
             dur_reg: 2,
         };
         let _ = EngineCommand::HideSprite {
-            asset_idx: 0,
+            asset: "icon.png".into(),
             trans_kind_idx: 0xFFFF,
             dur_reg: 0xFF,
         };
         let _ = EngineCommand::SetDialogue {
-            speaker_idx: 0,
-            text_idx: 1,
-            voice_idx: 0xFFFF,
+            speaker: "小百合".into(),
+            text: "你好！".into(),
+            voice: String::new(),
         };
-        let _ = EngineCommand::SetNarration { text_idx: 0 };
+        let _ = EngineCommand::SetNarration {
+            text: "旁白文本".into(),
+        };
         let _ = EngineCommand::PlayBgm {
-            asset_idx: 0,
+            asset: "bgm.ogg".into(),
             fade_reg: 0xFF,
             looping: true,
         };
         let _ = EngineCommand::StopBgm { fade_reg: 0xFF };
         let _ = EngineCommand::PlaySe {
-            asset_idx: 0,
+            asset: "se.ogg".into(),
             fade_reg: 0xFF,
         };
-        let _ = EngineCommand::PlayVoice { asset_idx: 0 };
+        let _ = EngineCommand::PlayVoice {
+            asset: "voice.ogg".into(),
+        };
         let _ = EngineCommand::Wait { dur_reg: 0 };
         let _ = EngineCommand::Effect {
-            type_idx: 0,
-            params: vec![(1, 2)],
+            effect_type: "shake".into(),
+            params: vec![("intensity".into(), 2)],
+        };
+        let _ = EngineCommand::Goto {
+            scene: "scene_b".into(),
+            label: String::new(),
         };
         let _ = EngineCommand::Error {
             message: "test error".into(),
@@ -377,14 +383,18 @@ mod tests {
     fn engine_command_display_does_not_panic() {
         let commands = [
             EngineCommand::SetBg {
-                asset_idx: 0,
+                asset: "bg.png".into(),
                 trans_kind_idx: 0xFFFF,
                 dur_reg: 0xFF,
             },
             EngineCommand::SetDialogue {
-                speaker_idx: 0,
-                text_idx: 1,
-                voice_idx: 0xFFFF,
+                speaker: "sayori".into(),
+                text: "你好".into(),
+                voice: String::new(),
+            },
+            EngineCommand::Goto {
+                scene: "scene_b".into(),
+                label: String::new(),
             },
             EngineCommand::Error {
                 message: "测试错误".into(),

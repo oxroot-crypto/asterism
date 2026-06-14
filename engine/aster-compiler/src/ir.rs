@@ -35,6 +35,29 @@ pub const NONE_REG: u8 = 0xFF;
 /// 常量池索引哨兵值 — 表示"无池条目"（可选字段未提供）
 pub const NONE_POOL: u16 = 0xFFFF;
 
+/// 寄存器模式标记 — 置于 u16 高字节 0xFF 段，表示该值是一个寄存器索引而非池索引。
+///
+/// 编码约定：
+/// - `0xFFFF` = NONE（无值）
+/// - `0xFF00-0xFF0F` = 寄存器 r0-r15
+/// - `0x0000-0xFEFF` = 常量池索引（最大 65279 条）
+///
+/// 避免了 0x8000 位标记在大型脚本（≥32768 条常量池）时的冲突。
+pub const REG_MARKER: u16 = 0xFF00;
+
+/// 判断 u16 值是否为寄存器模式（而非常量池索引）。
+/// `(idx & 0xFF00) == REG_MARKER`
+#[inline]
+pub fn is_reg(idx: u16) -> bool {
+    idx != NONE_POOL && (idx & 0xFF00) == REG_MARKER
+}
+
+/// 从带标记的 u16 值中提取寄存器索引（0-15）。
+#[inline]
+pub fn reg_from_marked(idx: u16) -> u8 {
+    (idx & 0x0F) as u8
+}
+
 /// 最大寄存器数量
 pub const MAX_REGISTERS: u8 = 16;
 
@@ -261,8 +284,9 @@ pub enum IrInstruction {
     JumpIfFlag { flag_idx: u16, target: String },
 
     /// 子例程调用：将返回地址压栈后跳转
-    /// - target: 目标标签名
-    Call { target: String },
+    /// - target: 目标标签名（子例程名）
+    /// - args: 调用参数所在的寄存器索引列表（空 = 无参数，预留为后续 sub 参数传递）
+    Call { target: String, args: Vec<u8> },
 
     /// 子例程返回：弹出调用栈顶的返回地址并跳转
     Return,
@@ -458,6 +482,13 @@ impl RegisterAllocator {
         RegisterAllocator { next: 0 }
     }
 
+    /// 创建一个从指定偏移开始的寄存器分配器。
+    ///
+    /// 用于同一 SceneNode 内多个表达式的寄存器分配不冲突。
+    pub fn with_base(base: u8) -> Self {
+        RegisterAllocator { next: base }
+    }
+
     /// 分配一个寄存器，返回其索引。
     ///
     /// # 返回值
@@ -471,6 +502,11 @@ impl RegisterAllocator {
         } else {
             None
         }
+    }
+
+    /// 返回下一个可用寄存器索引。
+    pub fn next_reg(&self) -> u8 {
+        self.next
     }
 
     /// 重置分配器，回收所有寄存器。
@@ -678,8 +714,8 @@ impl fmt::Display for IrInstruction {
             IrInstruction::JumpIfFlag { flag_idx, target } => {
                 write!(f, "JUMP_IF_FLAG pool[{}], {}", flag_idx, target)
             }
-            IrInstruction::Call { target } => {
-                write!(f, "CALL {}", target)
+            IrInstruction::Call { target, args } => {
+                write!(f, "CALL {}, {} args", target, args.len())
             }
             IrInstruction::Return => {
                 write!(f, "RETURN")
@@ -918,6 +954,7 @@ mod tests {
         };
         let _ = IrInstruction::Call {
             target: "sub".into(),
+            args: vec![],
         };
         let _ = IrInstruction::Return;
         let _ = IrInstruction::Label {

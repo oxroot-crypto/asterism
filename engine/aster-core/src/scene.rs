@@ -403,13 +403,19 @@ pub enum SceneNode {
         label: Option<Expr>,
     },
 
-    /// 子例程调用：将当前执行位置压栈，跳转到指定标签。
+    /// 子例程调用（函数式语法）：将当前执行位置压栈，跳转到指定子例程。
     ///
+    /// 语法：`name()` 或 `name(arg1, arg2, ...)`。
+    /// `name` 为子例程标识符（对应 `Subroutine.name`），`args` 为参数表达式列表。
     /// Phase 1 定义数据结构，VM 支持（PH1-T13 实现），
-    /// 完整调用栈在 Phase 2 中与存档功能集成。
+    /// 参数传递在 PH1-T14 中与 sub 参数列表一起完整实现。
     Call {
-        /// 调用目标标签名（表达式）
-        target: Expr,
+        /// 被调用的子例程名（标识符）
+        name: String,
+        /// 调用参数列表（表达式，预留为后续 sub 参数传递）
+        /// 当前版本中 args 为空，后续 Phase 实现参数求值并压栈
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<Expr>,
     },
 
     /// 子例程返回：从调用栈弹出返回地址并跳转回去。
@@ -421,6 +427,17 @@ pub enum SceneNode {
     Label {
         /// 标签名称（标识符，编译期常量）
         name: String,
+    },
+
+    /// 子例程定义：由 `label` + body + `return` 组成，仅在被 `call` 时执行。
+    ///
+    /// 与普通 `Label` 不同：子例程的 body 不会被主流程 fall-through 执行。
+    /// 编译器将其移至场景字节码末尾，主流程通过隐式 Jump 跳过。
+    Subroutine {
+        /// 子例程名称（即 `call` 的目标标签名）
+        name: String,
+        /// 子例程体（不含开头的 label 和结尾的 return 伪指令）
+        body: Vec<SceneNode>,
     },
 }
 
@@ -898,10 +915,12 @@ mod tests {
 
         // Call
         let call = SceneNode::Call {
-            target: s("subroutine"),
+            name: "subroutine".into(),
+            args: vec![],
         };
-        if let SceneNode::Call { target } = &call {
-            assert_eq!(target, &s("subroutine"));
+        if let SceneNode::Call { name, args } = &call {
+            assert_eq!(name, "subroutine");
+            assert!(args.is_empty());
         } else {
             panic!("应为 Call 变体");
         }
@@ -1086,6 +1105,7 @@ mod tests {
                 SceneNode::Return => "Return",
                 SceneNode::Wait { .. } => "Wait",
                 SceneNode::Label { .. } => "Label",
+                SceneNode::Subroutine { .. } => "Subroutine",
             }
         }
 
@@ -1173,7 +1193,10 @@ mod tests {
                 scene_id: s("x"),
                 label: None,
             },
-            SceneNode::Call { target: s("x") },
+            SceneNode::Call {
+                name: "x".into(),
+                args: vec![],
+            },
             SceneNode::Return,
             SceneNode::Wait { duration_ms: i(0) },
             SceneNode::Label { name: "x".into() },

@@ -41,6 +41,7 @@ pub fn build_statement(pair: &Pair<Rule>, source: &str) -> Result<Vec<SceneNode>
         Rule::call_stmt => build_call(pair, source).map(|n| vec![n]),
         Rule::return_stmt => Ok(vec![SceneNode::Return]),
         Rule::label_stmt => build_label(pair, source).map(|n| vec![n]),
+        Rule::sub_def => build_sub(pair, source).map(|n| vec![n]),
         Rule::assignment_stmt => build_assignment(pair, source).map(|n| vec![n]),
         Rule::set_flag_stmt => build_set_flag(pair).map(|n| vec![n]),
         Rule::unset_flag_stmt => build_unset_flag(pair).map(|n| vec![n]),
@@ -331,24 +332,42 @@ pub fn build_menu(pair: &Pair<Rule>, source: &str) -> Result<Vec<SceneNode>, Par
     let prompt = build_expr(&inner.next().unwrap(), source)?;
     let mut choices: Vec<Choice> = Vec::new();
     let mut body_sections: Vec<SceneNode> = Vec::new();
-    let mut choice_idx: usize = 0;
+
+    // 全局唯一计数器 — 避免场景内多个 Menu 的 @menu_choice_N 标签名冲突
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static MENU_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let menu_end_id = MENU_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let end_label = format!("@menu_end_{}", menu_end_id);
 
     for child in inner {
         if child.as_rule() == Rule::choice_block {
+            let choice_idx = MENU_COUNTER.fetch_add(1, Ordering::Relaxed);
             let (choice, body_nodes) = build_choice_with_body(&child, choice_idx, source)?;
-            // 为选项 body 生成 auto-label
             let auto_label = format!("@menu_choice_{}", choice_idx);
+            // 前一个 body 结束后插入 Jump 到 @menu_end，防止 fall-through
+            if !body_sections.is_empty() {
+                body_sections.push(SceneNode::Jump {
+                    target: aster_core::Expr::string_literal(end_label.clone()),
+                });
+            }
             body_sections.push(SceneNode::Label {
                 name: auto_label.clone(),
             });
             body_sections.extend(body_nodes);
             choices.push(choice);
-            choice_idx += 1;
         }
+    }
+    // 最后一个 body 结束后也加 Jump
+    if !body_sections.is_empty() {
+        body_sections.push(SceneNode::Jump {
+            target: aster_core::Expr::string_literal(end_label.clone()),
+        });
     }
 
     let mut result = vec![SceneNode::Menu { prompt, choices }];
     result.extend(body_sections);
+    result.push(SceneNode::Label { name: end_label });
     Ok(result)
 }
 
@@ -476,10 +495,22 @@ pub fn build_goto(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseErr
     Ok(SceneNode::Goto { scene_id, label })
 }
 
+/// 构建子例程调用节点。
+///
+/// 语法：`name()` 或 `name(arg1, arg2, ...)`（函数式调用）
+/// 产出 `SceneNode::Call { name, args }`。
+/// `name` 为子例程标识符，`args` 为参数表达式列表（预留）。
 pub fn build_call(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseError> {
     let mut inner = pair.clone().into_inner();
-    let target = build_expr(&inner.next().unwrap(), source)?;
-    Ok(SceneNode::Call { target })
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| err_at(pair, "call 语句缺少子例程名"))?;
+    let name = name_pair.as_str().to_string();
+    let mut args: Vec<Expr> = Vec::new();
+    for arg_pair in inner {
+        args.push(build_expr(&arg_pair, source)?);
+    }
+    Ok(SceneNode::Call { name, args })
 }
 
 pub fn build_label(pair: &Pair<Rule>, _source: &str) -> Result<SceneNode, ParseError> {
@@ -493,6 +524,31 @@ pub fn build_label(pair: &Pair<Rule>, _source: &str) -> Result<SceneNode, ParseE
         _ => name_pair.as_str().to_string(),
     };
     Ok(SceneNode::Label { name })
+}
+
+/// 构建子例程定义节点。
+///
+/// 语法：`sub "name" { statement* }`
+/// 产出 `SceneNode::Subroutine { name, body }`。
+/// 子例程仅在被 `call "name"` 时执行，主流程自动跳过。
+pub fn build_sub(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseError> {
+    let mut inner = pair.clone().into_inner();
+    let name_pair = inner
+        .next()
+        .ok_or_else(|| err_at(pair, "sub 语句缺少子例程名"))?;
+    let name = match name_pair.as_rule() {
+        Rule::string_literal => extract_string_content(&name_pair),
+        Rule::identifier => name_pair.as_str().to_string(),
+        _ => name_pair.as_str().to_string(),
+    };
+    let mut body: Vec<SceneNode> = Vec::new();
+    for child in inner {
+        match build_statement(&child, source) {
+            Ok(nodes) => body.extend(nodes),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(SceneNode::Subroutine { name, body })
 }
 
 // ========================================================================

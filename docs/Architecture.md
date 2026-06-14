@@ -228,15 +228,14 @@ scene "chapter1/prologue" {
     jump "branch_point"                             -- Jump: 场景内无条件跳转到标签
 
     -- === 子例程调用 ===
-    call "flashback"                                -- Call: 压栈并跳转到子例程
-    -- ... Return 后回到这里 ...
-    jump "menu_scene"
+    flashback()                                     -- 函数式调用: 压栈并跳转到子例程
+    -- ... 回到这里继续 ...
 
-    label "flashback"                               -- 子例程定义
-    bg "bg_memory" with dissolve(0.8)
-    music "bgm_memory" fade_in: 1.0
-    narration "【闪回】那是很多年前的约定。"
-    return                                          -- Return: 从子例程返回
+    sub "flashback" {                               -- 子例程定义（仅 name() 可调用）
+        bg "bg_memory" with dissolve(0.8)
+        music "bgm_memory" fade_in: 1.0
+        narration "【闪回】那是很多年前的约定。"
+    }
 
     -- === 选择支 ===
     label "menu_scene"
@@ -870,7 +869,7 @@ erDiagram
     }
 
     SceneNode {
-        enum type "Bg|ShowChar|ShowSprite|MoveChar|Emotion|HideChar|HideSprite|Dialogue|Narration|Menu|Branch|SetVariable|SetFlag|UnsetFlag|ToggleFlag|Music|StopMusic|PlaySE|Wait|Effect|Jump|Goto|Call|Return|Label"
+        enum type "Bg|ShowChar|ShowSprite|MoveChar|Emotion|HideChar|HideSprite|Dialogue|Narration|Menu|Branch|SetVariable|SetFlag|UnsetFlag|ToggleFlag|Music|StopMusic|PlaySE|Wait|Effect|Jump|Goto|Call|Return|Label|Subroutine"
         json properties
     }
 

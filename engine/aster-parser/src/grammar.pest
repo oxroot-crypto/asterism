@@ -233,9 +233,10 @@ statement = _{
     | branch_stmt              // if/elif/else
     | jump_stmt                // `jump <label>` 场景内
     | goto_stmt                // `goto <scene>` 跨场景
-    | call_stmt                // `call <label>`
+    | call_stmt                // `name()` 函数式调用
     | return_stmt              // `return`
     | label_stmt               // `label <name>`
+    | sub_def                  // `sub "name" { ... }`
     // ── 状态类 ──
     | assignment_stmt          // `$var = expr`
     // ── 媒体类（续）─
@@ -434,9 +435,10 @@ jump_stmt = { "jump" ~ expr }
 ///     `goto $next_scene label: $next_label`
 goto_stmt = { "goto" ~ expr ~ ("label" ~ ":" ~ expr)? }
 
-/// 子例程调用：`call <target>`
-/// 例：`call "flashback_subroutine"`
-call_stmt = { "call" ~ expr }
+/// 子例程调用（函数式）：`name()`
+/// 例：`flashback_subroutine()`
+///     `greet($name, 42)` — 预留参数列表，为后续 sub 参数传递提供支持
+call_stmt = { identifier ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 
 /// 子例程返回：`return`（无参数）
 return_stmt = { "return" }
@@ -447,6 +449,10 @@ return_stmt = { "return" }
 ///     `label branch_demo`
 label_stmt = { "label" ~ (string_literal | identifier) }
 
+/// 子例程定义：`sub "name" { statement* }`
+/// 仅在被 `name()` 调用时执行，主流程自动跳过
+/// 例：`sub "greet" { narration "hello" }`
+sub_def = { "sub" ~ (string_literal | identifier) ~ "{" ~ statement* ~ "}" }
 
 // ────────────────────────────────────────────────────────────────────
 // §4.10 变量与旗标 — SetVariable / SetFlag / UnsetFlag / ToggleFlag

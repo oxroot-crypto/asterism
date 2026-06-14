@@ -612,7 +612,7 @@ impl Optimizer {
                 IrInstruction::Jump { target }
                 | IrInstruction::JumpIf { target, .. }
                 | IrInstruction::JumpIfFlag { target, .. }
-                | IrInstruction::Call { target } => {
+                | IrInstruction::Call { target, .. } => {
                     refs.insert(target.clone());
                 }
                 IrInstruction::Menu { choices, .. } => {
@@ -676,7 +676,7 @@ impl Optimizer {
                     // 条件跳转会 fall-through
                     stack.push(idx + 1);
                 }
-                IrInstruction::Call { target } => {
+                IrInstruction::Call { target, .. } => {
                     if let Some(&target_idx) = label_map.get(target) {
                         stack.push(target_idx);
                     }
