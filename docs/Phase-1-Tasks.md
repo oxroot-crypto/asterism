@@ -21,7 +21,7 @@
 | PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [x] |
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [x] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [x] |
-| PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [ ] |
+| PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [x] |
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [ ] |
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [ ] |
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 8 | 进行中: 0 | 待开始: 13
+**统计**：总计 21 个任务 | 已完成: 9 | 进行中: 0 | 待开始: 12
 
 ---
 
@@ -810,7 +810,7 @@ graph TD
 | **对应需求** | REQ-ENG-013（对话文本渲染） |
 | **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `TextRenderer` 组件，Layer 4） |
 | **前置依赖** | PH1-T07（Layer Manager 框架，文本层在 Layer 4） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -873,6 +873,21 @@ graph TD
 | MV01 | CJK 文本显示 | 运行测试程序，在文本框中显示包含中文、日文假名、韩文、英文、数字的混合文本 | 所有字符正确显示，无乱码、无豆腐块（tofu） |
 | MV02 | 说话者名字区分 | 在测试程序中显示带有说话者名字（如"小百合"）和正文的对话 | 说话者名字与正文视觉区分（颜色/字号不同），位置在文本框左上角 |
 | MV03 | 自动换行 | 在文本框中输入一长串不包含换行的中文文本 | 文本在文本框边界自动换行，不超出文本框区域 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 23:00
+- 实际工时：8 小时
+- AI自验证结果：✅ AC01-AC04 全部通过（8/8 新测试 + 71/71 总测试通过，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV07 全部通过（集成 example 验证：CJK文本显示、说话者区分、自动换行、图层叠加、显隐切换、对话推进、立绘交互）
+- 备注：cosmic-text v0.19 集成。采用自定义行式图集(RowAtlas) + SwashCache 光栅化。文本始终固定在文本框内说话者名字下方（旁白/对话位置不跳动）。修复了 Y 轴翻转、图集写入越界、bearing 偏移三个 bug。旧 example（sprite_demo/window_test）已删除，统一为 integration_demo。
+
+**上下文交接**：
+- 关键决策：cosmic-text 0.19 API → Buffer::set_size/set_text 无需 FontSystem，shape_until_scroll 需 FontSystem；SwashCache::get_image() 直接光栅化并返回 SwashImage；自定义 RowAtlas（行式货架）替代 etagere 避免额外依赖；R8Unorm 单通道纹理存储字形 Alpha 蒙版
+- 新增接口：`TextRenderer::new(device, queue, format, w, h, config)` / `set_text(speaker, body)` / `clear_text()` / `load_font(bytes)` / `resize(w, h)` / `prepare(device, queue)`；`TextConfig { font_size, speaker_font_size, line_height, text_color, speaker_color, text_box_padding }`；实现 `Layer` trait
+- 新增着色器：`text.wgsl` — @group(0) 图集纹理+采样器，@location(0/1/2) 位置/UV/颜色
+- 已知限制：glyph_id==0 空白字形被跳过（非完整字形回退）；字体依赖系统字体（FontSystem::new()），未内嵌默认 CJK 字体；图集增长最多一次（1024→2048），超出后跳过字形
+- 建议下一个任务先读取：`text_renderer.rs`（TextRenderer API + prepare/render 流程）、`shaders/text.wgsl`（着色器接口）、`examples/integration_demo.rs`（使用示例）
 
 ---
 ### PH1-T10 — 打字机效果

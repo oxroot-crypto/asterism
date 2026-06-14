@@ -34,6 +34,7 @@ pub mod config;
 pub mod gpu_context;
 pub mod layer_manager;
 pub mod sprite_layer;
+pub mod text_renderer;
 pub mod texture;
 
 // ============================================================================
@@ -45,4 +46,5 @@ pub use config::RenderConfig;
 pub use gpu_context::{Frame, GpuContext, RenderError};
 pub use layer_manager::{Layer, LayerManager};
 pub use sprite_layer::{Sprite, SpriteDescriptor, SpriteLayer, SpritePosition};
+pub use text_renderer::{TextConfig, TextRenderer};
 pub use texture::{Texture, create_texture_bind_group_layout};

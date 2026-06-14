@@ -12,3 +12,4 @@ winit = { workspace = true }
 pollster = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
+cosmic-text = "0.19"
