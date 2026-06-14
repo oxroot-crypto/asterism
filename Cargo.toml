@@ -39,6 +39,7 @@ authors = ["Asterism Contributors"]
 serde = { version = "1", features = ["derive"] }
 aster-core = { path = "engine/aster-core" }
 aster-parser = { path = "engine/aster-parser" }
+aster-compiler = { path = "engine/aster-compiler" }
 
 # 引擎与 IDE 通用依赖
 thiserror = "2"

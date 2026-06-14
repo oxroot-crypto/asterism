@@ -312,6 +312,11 @@ version = "0.1.0"
 [[package]]
 name = "aster-vm"
 version = "0.1.0"
+dependencies = [
+ "aster-compiler",
+ "aster-core",
+ "aster-parser",
+]
 
 [[package]]
 name = "atk"

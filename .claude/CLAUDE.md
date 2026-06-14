@@ -282,13 +282,13 @@ export async function checkSyntax(source: string): Promise<Diagnostic[]> {
 
 在提交代码前，AI 必须自行完成以下检查。
 
-> 注：`cargo fmt` 已通过 `.githooks/pre-commit` 自动化（见 3.5 节），以下为兜底验证。
+> 注：以下 **粗体** 项已通过 `.githooks/pre-commit` 自动化执行（见 3.5 节），其余为人工检查项。
 
-- [ ] `cargo fmt --check` 通过（Hook 已自动执行，此处二次确认）
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` 通过（零 warning）
-- [ ] `cargo test --workspace` 通过
-- [ ] `pnpm --dir ide typecheck` 通过
-- [ ] `pnpm --dir ide lint` 通过
+- [ ] **`cargo fmt --check` 通过**（Hook Step 2 自动执行）
+- [ ] **`cargo clippy --workspace --exclude aster-ide --all-targets -- -D warnings` 通过**（Hook Step 3 自动执行）
+- [ ] **`cargo test --workspace --exclude aster-ide` 通过**（Hook Step 4 自动执行）
+- [ ] **`pnpm --dir ide typecheck` 通过**（Hook Step 6 自动执行）
+- [ ] **`pnpm --dir ide lint` 通过**（Hook Step 5 自动执行）
 - [ ] 新增的公开函数/类型有完整的中文 docstring / JSDoc
 - [ ] 没有遗留的 `unwrap()` / `expect()` / `todo!()` / `unimplemented!()`（除非有明确的 Issue 追踪）
 - [ ] 没有硬编码的魔法数字（均应定义为命名常量）
@@ -328,48 +328,43 @@ Thumbs.db
 - 操作系统的元数据文件
 - 用户的本地 IDE 配置（`.vscode/` 除外，允许共享推荐扩展和调试配置）
 
-### 3.5 Git Hook — 自动格式化
+### 3.5 Git Hook — 提交前本地校验（镜像 CI 管线）
 
-项目通过 `.githooks/pre-commit` 在每次 `git commit` 前**自动执行 `cargo fmt`**，确保所有 Rust 代码提交前已格式化。
+项目通过 `.githooks/pre-commit` 在每次 `git commit` 前**自动执行与 CI 管线一致的本地校验**，确保提交的代码能通过 CI 门禁。
 
 **Hook 文件**：`.githooks/pre-commit`
 
+**校验步骤（与 `.github/workflows/ci-*.yml` 顺序一致）**：
+
+| Hook Step | CI 对应 | 校验项 | 变更范围 | 说明 |
+|-----------|---------|--------|---------|------|
+| Step 0 | — | 变更类型检测 | — | 自动识别 `.rs` / `.ts` / `.vue` 变更 |
+| Step 1 | ci-rust Step 4 前置 | `cargo fmt --all` | Rust | 自动格式化 + 重新暂存（自动修复） |
+| Step 2 | ci-rust Step 4 | `cargo fmt --check` | Rust | 格式门禁（零 tolerance） |
+| Step 3 | ci-rust Step 5 | `cargo clippy` | Rust | Lint 门禁（零 warning，排除 aster-ide） |
+| Step 4 | ci-rust Step 6 | `cargo test` | Rust | 单元测试 + 集成测试（排除 aster-ide） |
+| Step 5 | ci-ide Step 5 | `pnpm lint` | IDE | ESLint 门禁 |
+| Step 6 | ci-ide Step 6 | `pnpm typecheck` | IDE | TypeScript 类型检查 |
+| Step 7 | ci-ide Step 7 | `pnpm test` | IDE | Vitest 单元测试 |
+
+**智能跳过**：
+- 仅 Rust 文件变更时，跳过 Step 5-7（IDE 校验）
+- 仅 IDE/前端文件变更时，跳过 Step 1-4（Rust 校验）
+- 无相关文件变更时，直接放行
+
+**环境变量（跳过慢步骤，用于紧急修复提交）**：
+
+| 变量 | 作用 |
+|------|------|
+| `SKIP_CLIPPY=1` | 跳过 `cargo clippy`（通常最慢） |
+| `SKIP_RUST_TESTS=1` | 跳过 `cargo test` |
+| `SKIP_IDE_CHECKS=1` | 跳过所有 IDE/前端校验 |
+| `SKIP_IDE_TESTS=1` | 跳过 `pnpm test` |
+
+使用示例：
 ```bash
-#!/usr/bin/env bash
-# Asterism Pre-Commit Hook — 提交前自动 cargo fmt
-#
-# 功能：
-# 1. 检测是否有待提交的 .rs 文件变更
-# 2. 如有，执行 cargo fmt --all 自动格式化
-# 3. 将格式化后的变更重新添加到暂存区
-# 4. 如有未格式化文件，输出提示后继续提交
-
-set -euo pipefail
-
-# 检测暂存区中是否有 .rs 文件
-STAGED_RUST_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
-
-if [ -n "$STAGED_RUST_FILES" ]; then
-  echo "→ 检测到 Rust 文件变更，执行 cargo fmt --all ..."
-  
-  # 执行自动格式化
-  if cargo fmt --all; then
-    echo "✓ cargo fmt 完成"
-    
-    # 将格式化后的变更重新添加到暂存区
-    for file in $STAGED_RUST_FILES; do
-      if [ -f "$file" ]; then
-        git add "$file"
-      fi
-    done
-    echo "✓ 已更新暂存区"
-  else
-    echo "✗ cargo fmt 执行失败，提交已阻止"
-    exit 1
-  fi
-else
-  echo "→ 无 Rust 文件变更，跳过 cargo fmt"
-fi
+# 紧急修复，跳过慢步骤
+SKIP_CLIPPY=1 SKIP_RUST_TESTS=1 git commit -m "fix(renderer): 紧急修复崩溃"
 ```
 
 **启用 Hook**（开发者首次克隆后执行）：

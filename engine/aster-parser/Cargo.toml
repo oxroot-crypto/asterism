@@ -8,7 +8,7 @@ description = ".aster DSL 解析器 — 将源码文本解析为 AST，基于 PE
 [dependencies]
 pest = "2"
 pest_derive = "2"
-aster-core = { workspace = true }
+aster-core.workspace = true
 
 [dev-dependencies]
 # 性能测试使用 std::time，无需外部依赖

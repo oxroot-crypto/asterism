@@ -12,4 +12,4 @@ serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-aster-parser = { workspace = true }
+aster-parser.workspace = true

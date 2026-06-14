@@ -6,10 +6,10 @@ license.workspace = true
 description = "渲染器 — GPU 渲染管线，负责精灵批处理/转场特效/文本渲染"
 
 [dependencies]
-thiserror = { workspace = true }
-wgpu = { workspace = true }
-winit = { workspace = true }
-pollster = { workspace = true }
-image = { workspace = true }
-bytemuck = { workspace = true }
+thiserror.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+image.workspace = true
+bytemuck.workspace = true
 cosmic-text = "0.19"

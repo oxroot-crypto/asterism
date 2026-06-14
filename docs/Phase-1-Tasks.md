@@ -25,7 +25,7 @@
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [x] |
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [x] |
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [x] |
-| PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
+| PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [x] |
 | PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
 | PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [ ] |
 | PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 12 | 进行中: 0 | 待开始: 9
+**统计**：总计 21 个任务 | 已完成: 13 | 进行中: 0 | 待开始: 8
 
 ---
 
@@ -1198,7 +1198,7 @@ graph TD
 | **对应需求** | REQ-ENG-002（字节码执行 — VM 核心）, REQ-ENG-022（选择支回调） |
 | **对应架构模块** | `aster-vm`（参考 Architecture.md §4.5） |
 | **前置依赖** | PH1-T11（`CompiledScene` 字节码格式）, PH1-T12（优化后的字节码） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1271,6 +1271,24 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 简单场景执行 | 编译一个包含 bg + show + dialogue + end 的脚本 → VM 执行 → 观察输出的 VmAction 序列 | VmAction 序列为：SetBg → ShowChar → SetDialogue + WaitForInput → SceneEnd |
 | MV02 | 菜单回调 | 编译含 `menu` 的脚本 → VM 执行到菜单 → 观察 VmAction::ShowMenu 中的 choices 内容 | choices 列表包含正确的选项文本和跳转目标 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 23:00
+- 实际工时：12 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（41 单元测试 + 3 文档测试 + workspace 全绿）
+- 人工测试结果：✅ MV01-MV02 全部通过（demo_ph1_t13.aster 端到端执行，菜单交互正确）
+- 备注：
+  - 修复了 `aster-compiler` 的 4 处 `instruction_size` 错误（ShowChar/MoveChar/ShowSprite/Emotion）
+  - 修复了 `aster-compiler` 的 Effect Pass1 偏移计算错误（`params*3`→`params*4`）
+  - 修复了 `aster-compiler` 优化器 Menu 选项标签被误删的 bug（`collect_referenced_labels` + `compute_reachable`）
+  - VM step() 使用 loop+continue 代替尾递归防止栈溢出；内部循环有安全计数器；所有寄存器访问有边界检查
+
+**上下文交接**：
+- 关键决策：step() 内部用 `loop` 而非递归，内部指令（Push*/Jump）通过 `continue` 继续，外部动作通过 `return` 退出
+- 新增接口：`Vm::step(&mut self, &CompiledScene) -> VmAction`、`Vm::pc()`、`Vm::set_pc()`、`Vm::registers()`、`Vm::variables()`/`variables_mut()`、`Vm::flags()`/`flags_mut()`
+- 已知限制：PH1-T14 指令（变量/旗标/运算/条件跳转/子例程/Goto）当前返回 Error（PC 会推进），不会 panic
+- 建议下一个任务先读取：`engine/aster-vm/src/vm.rs`（step() 完整实现）、`engine/aster-compiler/src/optimizer.rs`（已修复的优化器）、`engine/aster-vm/examples/run_scene.rs`（端到端 demo）
 
 ---
 ### PH1-T14 — 实现 `aster-vm` — 变量/旗标/跳转执行

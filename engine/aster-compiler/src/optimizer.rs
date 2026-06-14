@@ -615,6 +615,13 @@ impl Optimizer {
                 | IrInstruction::Call { target } => {
                     refs.insert(target.clone());
                 }
+                IrInstruction::Menu { choices, .. } => {
+                    // Menu 选项的 target 也是标签引用，必须收集
+                    // 否则优化器会认为选项 body 的 auto-label 不可达
+                    for choice in choices {
+                        refs.insert(choice.target.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -626,7 +633,7 @@ impl Optimizer {
         &self,
         ir: &[IrInstruction],
         label_map: &HashMap<String, usize>,
-        _referenced_labels: &HashSet<String>,
+        referenced_labels: &HashSet<String>,
     ) -> HashSet<usize> {
         let mut reachable = HashSet::new();
         if ir.is_empty() {
@@ -635,6 +642,15 @@ impl Optimizer {
 
         // 深度优先搜索可达指令
         let mut stack: Vec<usize> = vec![0]; // 从第一条指令开始
+
+        // 将所有被引用的标签（Jump/Call/Menu target 等）作为额外入口点
+        // 这些标签可能无法通过顺序执行到达
+        // （例如 Menu 选项 body 的 auto-label，位于无条件 Jump 之后）
+        for label_name in referenced_labels {
+            if let Some(&idx) = label_map.get(label_name) {
+                stack.push(idx);
+            }
+        }
         let mut visited = HashSet::new();
 
         while let Some(idx) = stack.pop() {

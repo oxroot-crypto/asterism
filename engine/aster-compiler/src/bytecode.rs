@@ -409,8 +409,8 @@ pub fn encode_instructions(
             IrInstruction::Effect { params, .. } => {
                 // 头部：op(1) + type(2) + param_count(1)
                 current_offset += 4;
-                // 每个 param：key_idx(2) + value_reg(1)
-                current_offset += params.len() * 3;
+                // 每个 param：key_idx(2) + value_reg(2)
+                current_offset += params.len() * 4;
             }
             _ => {
                 current_offset += instruction_size(inst);
@@ -498,10 +498,10 @@ fn instruction_size(inst: &IrInstruction) -> usize {
         | IrInstruction::Or { .. } => 4,
         IrInstruction::Not { .. } | IrInstruction::Neg { .. } => 3,
         IrInstruction::Bg { .. } => 6,
-        IrInstruction::ShowChar { .. } => 10,
-        IrInstruction::ShowSprite { .. } => 11,
-        IrInstruction::MoveChar { .. } => 10,
-        IrInstruction::Emotion { .. } => 9,
+        IrInstruction::ShowChar { .. } => 11,
+        IrInstruction::ShowSprite { .. } => 10,
+        IrInstruction::MoveChar { .. } => 11,
+        IrInstruction::Emotion { .. } => 8,
         IrInstruction::HideChar { .. } => 6,
         IrInstruction::HideSprite { .. } => 6,
         IrInstruction::Dialogue { .. } => 7,
