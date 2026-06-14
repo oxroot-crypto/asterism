@@ -23,7 +23,7 @@
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [x] |
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [x] |
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [x] |
-| PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [ ] |
+| PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [x] |
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
 | PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 10 | 进行中: 0 | 待开始: 11
+**统计**：总计 21 个任务 | 已完成: 11 | 进行中: 0 | 待开始: 10
 
 ---
 
@@ -993,7 +993,7 @@ graph TD
 | **对应需求** | REQ-ENG-002（字节码编译与执行 — 编译部分） |
 | **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4） |
 | **前置依赖** | PH1-T05（AST 构建器 — 产出 `aster_core::Scene`） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1054,6 +1054,31 @@ graph TD
 | MV01 | 编译验证 | 在终端执行 `cargo build --package aster-compiler` | 编译成功，无错误 |
 | MV02 | 示例脚本编译 | 在测试或临时 main 中编译 `templates/default_project/scripts/prologue.aster`，打印常量池和指令数 | 常量池包含所有文字（对话/选项/标签等），指令数合理（非空，非异常大） |
 | MV03 | 错误脚本反馈 | 故意写一个有语义错误的脚本（如 jump 到不存在的标签），编译并观察错误输出 | 错误信息包含具体的标签名和所在行号，中文描述清晰 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14
+- 实际工时：8 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（27/27 单元测试 + 5/5 文档测试 + 118/118 全工作区测试）
+- 人工测试结果：✅ MV01-MV03 全部通过（prologue.aster 编译：147 节点 → 410 指令，2228 字节，143 常量池条目，5 标签）
+- 备注：
+  - 超出原始范围：同步修复了 PH1-T05 (parser) 的 Choice body 丢弃问题，`build_menu` 返回类型从 `SceneNode` 改为 `Vec<SceneNode>`
+  - 新增 example: `compile_prologue.rs` 用于人工验证
+  - Goto→Jump 混用问题已随 parser 修复自动消除
+- 关键决策：
+  - IR 使用字符串标签名（编译阶段解析为字节偏移），`@` 前缀区分内部标签
+  - 寄存器策略：简单线性分配 0-15，每次 SceneNode 编译前复位（PH1-T12 优化）
+  - Sentinel 值：0xFF = NONE_REG, 0xFFFF = NONE_POOL
+  - v0.1 限制：Menu 条件选项仅支持简单旗标检查（`%flag`），复杂表达式条件标记为无条件
+- 新增接口：
+  - `Compiler::compile(scene: &Scene) -> Result<CompiledScene, Vec<CompileError>>` — 主入口
+  - `CompiledScene { version, instructions, constant_pool, label_table }` — 编译产物
+  - `Opcode` 枚举（45 个操作码）— 1 byte 定长操作码
+  - `IrInstruction` 枚举（46 变体）— 中间表示
+- 已知限制：
+  - Menu 条件选项仅支持简单旗标（`%flag`），复杂表达式（`$a>=5`）暂不处理
+  - 复杂字符串拼接表达式在 Dialogue 中编译为寄存器引用而非 pool_idx，VM 需适配
+- 建议下一个任务先读取：`engine/aster-compiler/src/ir.rs`、`engine/aster-compiler/src/bytecode.rs`、`engine/aster-compiler/src/compiler.rs`
 
 ---
 ### PH1-T12 — 实现 `aster-compiler` — 优化 Pass（4 个）

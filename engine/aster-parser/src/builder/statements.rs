@@ -20,33 +20,36 @@ use crate::parser::Rule;
 
 /// 语句分发器 — 根据 pair 规则类型调用对应构建函数。
 /// 被 `AstBuilder::build_statement` 委托，同时被自身递归调用（Branch/Menu/Choice 内的语句解析）。
-pub fn build_statement(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseError> {
+///
+/// 返回 `Vec<SceneNode>` 而非单个 `SceneNode`，以支持 Menu 等语句展开为多个节点
+/// （Menu 自身 + 每个选项 body 对应的 auto-labeled 节点序列）。
+pub fn build_statement(pair: &Pair<Rule>, source: &str) -> Result<Vec<SceneNode>, ParseError> {
     match pair.as_rule() {
-        Rule::bg_stmt => build_bg(pair, source),
-        Rule::show_char_stmt => build_show_char(pair, source),
-        Rule::emotion_stmt => build_emotion(pair, source),
-        Rule::sprite_stmt => build_sprite(pair, source),
-        Rule::move_char_stmt => build_move_char(pair, source),
-        Rule::hide_sprite_stmt => build_hide_sprite(pair, source),
-        Rule::hide_char_stmt => build_hide_char(pair, source),
-        Rule::narration_stmt => build_narration(pair, source),
-        Rule::dialogue_stmt => build_dialogue(pair, source),
+        Rule::bg_stmt => build_bg(pair, source).map(|n| vec![n]),
+        Rule::show_char_stmt => build_show_char(pair, source).map(|n| vec![n]),
+        Rule::emotion_stmt => build_emotion(pair, source).map(|n| vec![n]),
+        Rule::sprite_stmt => build_sprite(pair, source).map(|n| vec![n]),
+        Rule::move_char_stmt => build_move_char(pair, source).map(|n| vec![n]),
+        Rule::hide_sprite_stmt => build_hide_sprite(pair, source).map(|n| vec![n]),
+        Rule::hide_char_stmt => build_hide_char(pair, source).map(|n| vec![n]),
+        Rule::narration_stmt => build_narration(pair, source).map(|n| vec![n]),
+        Rule::dialogue_stmt => build_dialogue(pair, source).map(|n| vec![n]),
         Rule::menu_stmt => build_menu(pair, source),
-        Rule::branch_stmt => build_branch(pair, source),
-        Rule::jump_stmt => build_jump(pair, source),
-        Rule::goto_stmt => build_goto(pair, source),
-        Rule::call_stmt => build_call(pair, source),
-        Rule::return_stmt => Ok(SceneNode::Return),
-        Rule::label_stmt => build_label(pair, source),
-        Rule::assignment_stmt => build_assignment(pair, source),
-        Rule::set_flag_stmt => build_set_flag(pair),
-        Rule::unset_flag_stmt => build_unset_flag(pair),
-        Rule::toggle_flag_stmt => build_toggle_flag(pair),
-        Rule::music_stmt => build_music(pair, source),
-        Rule::stop_music_stmt => build_stop_music(pair, source),
-        Rule::se_stmt => build_se(pair, source),
-        Rule::effect_stmt => build_effect(pair, source),
-        Rule::wait_stmt => build_wait(pair, source),
+        Rule::branch_stmt => build_branch(pair, source).map(|n| vec![n]),
+        Rule::jump_stmt => build_jump(pair, source).map(|n| vec![n]),
+        Rule::goto_stmt => build_goto(pair, source).map(|n| vec![n]),
+        Rule::call_stmt => build_call(pair, source).map(|n| vec![n]),
+        Rule::return_stmt => Ok(vec![SceneNode::Return]),
+        Rule::label_stmt => build_label(pair, source).map(|n| vec![n]),
+        Rule::assignment_stmt => build_assignment(pair, source).map(|n| vec![n]),
+        Rule::set_flag_stmt => build_set_flag(pair).map(|n| vec![n]),
+        Rule::unset_flag_stmt => build_unset_flag(pair).map(|n| vec![n]),
+        Rule::toggle_flag_stmt => build_toggle_flag(pair).map(|n| vec![n]),
+        Rule::music_stmt => build_music(pair, source).map(|n| vec![n]),
+        Rule::stop_music_stmt => build_stop_music(pair, source).map(|n| vec![n]),
+        Rule::se_stmt => build_se(pair, source).map(|n| vec![n]),
+        Rule::effect_stmt => build_effect(pair, source).map(|n| vec![n]),
+        Rule::wait_stmt => build_wait(pair, source).map(|n| vec![n]),
         other => Err(err_at(pair, format!("意外的语句规则：{:?}", other))),
     }
 }
@@ -320,21 +323,45 @@ pub fn build_narration(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, Par
 // ========================================================================
 
 /// `menu_stmt = { "menu" ~ expr ~ "{" ~ choice_block* ~ "}" }`
-pub fn build_menu(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseError> {
+///
+/// 返回多个 SceneNode：[Menu, Label("@menu_choice_0"), <body_0...>, Label("@menu_choice_1"), <body_1...>, ...]
+/// 每个选项的 body 语句被保留为 auto-labeled 节点序列，Choice.target 指向对应的 auto-label。
+pub fn build_menu(pair: &Pair<Rule>, source: &str) -> Result<Vec<SceneNode>, ParseError> {
     let mut inner = pair.clone().into_inner();
     let prompt = build_expr(&inner.next().unwrap(), source)?;
     let mut choices: Vec<Choice> = Vec::new();
+    let mut body_sections: Vec<SceneNode> = Vec::new();
+    let mut choice_idx: usize = 0;
+
     for child in inner {
         if child.as_rule() == Rule::choice_block {
-            let choice = build_choice(&child, source)?;
+            let (choice, body_nodes) = build_choice_with_body(&child, choice_idx, source)?;
+            // 为选项 body 生成 auto-label
+            let auto_label = format!("@menu_choice_{}", choice_idx);
+            body_sections.push(SceneNode::Label {
+                name: auto_label.clone(),
+            });
+            body_sections.extend(body_nodes);
             choices.push(choice);
+            choice_idx += 1;
         }
     }
-    Ok(SceneNode::Menu { prompt, choices })
+
+    let mut result = vec![SceneNode::Menu { prompt, choices }];
+    result.extend(body_sections);
+    Ok(result)
 }
 
 /// `choice_block = { expr ~ ("if" ~ expr)? ~ "{" ~ statement* ~ "}" }`
-fn build_choice(pair: &Pair<Rule>, source: &str) -> Result<Choice, ParseError> {
+///
+/// 返回 (Choice, body_nodes)：
+/// - Choice.target 设为 `@menu_choice_{idx}` auto-label
+/// - body_nodes 包含选项被选中后执行的所有语句
+fn build_choice_with_body(
+    pair: &Pair<Rule>,
+    choice_idx: usize,
+    source: &str,
+) -> Result<(Choice, Vec<SceneNode>), ParseError> {
     let mut inner = pair.clone().into_inner();
     let text = build_expr(
         &inner
@@ -343,7 +370,7 @@ fn build_choice(pair: &Pair<Rule>, source: &str) -> Result<Choice, ParseError> {
         source,
     )?;
     let mut condition: Option<Expr> = None;
-    let mut target_nodes: Vec<SceneNode> = Vec::new();
+    let mut body_nodes: Vec<SceneNode> = Vec::new();
     for child in inner {
         match child.as_rule() {
             Rule::expr => {
@@ -354,25 +381,22 @@ fn build_choice(pair: &Pair<Rule>, source: &str) -> Result<Choice, ParseError> {
             _ => {
                 // statement 子节点（statement 为静默规则，子规则直接出现）
                 match build_statement(&child, source) {
-                    Ok(node) => target_nodes.push(node),
+                    Ok(new_nodes) => body_nodes.extend(new_nodes),
                     Err(e) => return Err(e),
                 }
             }
         }
     }
-    let target = target_nodes
-        .first()
-        .and_then(|node| match node {
-            SceneNode::Jump { target } => Some(target.clone()),
-            SceneNode::Goto { scene_id, .. } => Some(scene_id.clone()),
-            _ => None,
-        })
-        .unwrap_or_else(|| Expr::string_literal(""));
-    Ok(Choice {
-        text,
-        target,
-        condition,
-    })
+    // Choice.target 指向 auto-label，VM 选中后跳转到对应 body
+    let target = Expr::string_literal(format!("@menu_choice_{}", choice_idx));
+    Ok((
+        Choice {
+            text,
+            target,
+            condition,
+        },
+        body_nodes,
+    ))
 }
 
 // ========================================================================
@@ -393,7 +417,7 @@ pub fn build_branch(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseE
         && !matches!(inner[idx].as_rule(), Rule::elif_branch | Rule::else_branch)
     {
         match build_statement(&inner[idx], source) {
-            Ok(node) => then_nodes.push(node),
+            Ok(new_nodes) => then_nodes.extend(new_nodes),
             Err(e) => return Err(e),
         }
         idx += 1;
@@ -407,7 +431,7 @@ pub fn build_branch(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseE
             let mut elif_nodes: Vec<SceneNode> = Vec::new();
             for node_pair in &elif_inner[1..] {
                 match build_statement(node_pair, source) {
-                    Ok(node) => elif_nodes.push(node),
+                    Ok(new_nodes) => elif_nodes.extend(new_nodes),
                     Err(e) => return Err(e),
                 }
             }
@@ -421,7 +445,7 @@ pub fn build_branch(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseE
         let mut nodes: Vec<SceneNode> = Vec::new();
         for node_pair in inner[idx].clone().into_inner() {
             match build_statement(&node_pair, source) {
-                Ok(node) => nodes.push(node),
+                Ok(new_nodes) => nodes.extend(new_nodes),
                 Err(e) => return Err(e),
             }
         }

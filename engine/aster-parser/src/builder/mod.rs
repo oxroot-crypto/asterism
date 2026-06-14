@@ -186,7 +186,7 @@ impl AstBuilder {
                     }
                 }
                 _ => match Self::build_statement(&child, source) {
-                    Ok(node) => nodes.push(node),
+                    Ok(new_nodes) => nodes.extend(new_nodes),
                     Err(e) => errors.push(e),
                 },
             }
@@ -201,7 +201,7 @@ impl AstBuilder {
     // ── 语句分发 ──────────────────────────────────────────────────────
 
     /// 根据 pair 规则类型分发到对应构建方法。覆盖全部 25 种 SceneNode 变体。
-    fn build_statement(pair: &Pair<Rule>, source: &str) -> Result<SceneNode, ParseError> {
+    fn build_statement(pair: &Pair<Rule>, source: &str) -> Result<Vec<SceneNode>, ParseError> {
         statements::build_statement(pair, source)
     }
 }
