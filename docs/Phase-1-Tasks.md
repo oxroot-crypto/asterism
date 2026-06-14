@@ -20,7 +20,7 @@
 | PH1-T05 | 实现 `aster-parser` — AST 构建器 | P0 | 6h | PH1-T02, PH1-T03, PH1-T04 | [x] |
 | PH1-T06 | wgpu 设备初始化 + 窗口创建 | P0 | 8h | 无 | [x] |
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [x] |
-| PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [ ] |
+| PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [x] |
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [ ] |
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [ ] |
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 7 | 进行中: 0 | 待开始: 14
+**统计**：总计 21 个任务 | 已完成: 8 | 进行中: 0 | 待开始: 13
 
 ---
 
@@ -714,7 +714,7 @@ graph TD
 | **对应需求** | REQ-ENG-012（角色立绘渲染） |
 | **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6 — `SpriteBatcher`、Layer 1/2） |
 | **前置依赖** | PH1-T02（Character 类型引用）, PH1-T07（背景图层 — 立绘层在背景之上） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -784,6 +784,21 @@ graph TD
 | MV01 | 多立绘同时显示 | 运行测试程序，在背景上加载 3 个角色立绘（左侧、中间、右侧各一个），观察显示效果 | 3 个立绘同时显示在背景之上，带透明度的区域正确显示背景，位置正确 |
 | MV02 | 透明度渐变 | 在测试程序中添加一个立绘，通过滑块或代码循环将 alpha 从 0.0 渐变到 1.0 | 立绘从透明逐渐变为不透明，过渡平滑 |
 | MV03 | 立绘替换 | 先显示角色 A 的立绘，1 秒后替换为角色 A 的另一个表情立绘 | 立绘正确替换，无闪烁，旧立绘消失、新立绘出现 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 22:00
+- 实际工时：6 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（63/63 单元测试 + 1 doctest，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV03 全部通过
+- 备注：交付文件数超出原始计划——LayerManager 与 SpriteLayer 分离实现，example 使用程序化纹理无需外部文件。立绘替换和 alpha 动画在 live coding 中修复了两处 bug（替换后 ID 未更新、显隐为空实现）。
+
+**上下文交接**：
+- 关键决策：`Layer` trait 定义统一 `render()` 接口，`LayerManager` 管理 6 层栈；`SpriteLayer` 每个立绘持有独立 uniform buffer+bind group，按 z-index 排序渲染；alpha 混合使用 `BlendState::ALPHA_BLENDING`（SrcAlpha/OneMinusSrcAlpha）；立绘缩放基于纹理像素尺寸/窗口尺寸比例自动计算 NDC 半尺寸
+- 新增接口：`Layer` trait（`render(&self, encoder, output_view)`）、`LayerManager`（`new/set_layer/remove_layer/render/has_layer/active_layer_count`）、`SpriteLayer`（`new/add_sprite/remove_sprite/update_position/update_alpha/update_scale/clear/resize/sprite_count/get_sprite/sprites`）、`SpritePosition`（`Left/Center/Right/Custom+to_coords`）、`SpriteDescriptor`（builder 模式）、`Sprite`（查询用）
+- 新增着色器：`sprite.wgsl` — 四边形顶点变换 + alpha 混合片元着色，`@group(0)` 纹理+采样器、`@group(1)` SpriteUniform
+- 已知限制：`add_sprite` 每次生成新 ID（非幂等替换），调用方需自行管理 ID 更新；`SpriteLayer` 无直接更新 z-index API（需 remove+add 实现）；LayerManager 持有 `Box<dyn Layer>` 所有权，外部无法同时持有引用调用 update 方法（example 中未使用 LayerManager 以便测试）
+- 建议下一个任务先读取：`sprite_layer.rs`（SpriteLayer API）、`layer_manager.rs`（Layer trait）、`shaders/sprite.wgsl`（着色器接口）、`examples/sprite_demo.rs`（使用示例）
 
 ---
 ### PH1-T09 — 文本渲染 — cosmic-text 集成

@@ -33,6 +33,7 @@ use wgpu::{
     VertexState, include_wgsl,
 };
 
+use crate::layer_manager::Layer;
 use crate::texture::Texture;
 
 // ============================================================================
@@ -395,6 +396,20 @@ impl BackgroundLayer {
     /// 将 FitUniform 数据写入 GPU uniform 缓冲区。
     fn update_fit_buffer(&self, queue: &Queue, uniform: FitUniform) {
         queue.write_buffer(&self.fit_buffer, 0, bytemuck::bytes_of(&uniform));
+    }
+}
+
+// ============================================================================
+// Layer trait 实现 — 将 BackgroundLayer 接入 LayerManager
+// ============================================================================
+
+impl Layer for BackgroundLayer {
+    fn render<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        output_view: &'a wgpu::TextureView,
+    ) {
+        self.render(encoder, output_view);
     }
 }
 
