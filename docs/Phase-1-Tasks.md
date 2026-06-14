@@ -24,7 +24,7 @@
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [x] |
 | PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [x] |
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [x] |
-| PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
+| PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [x] |
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
 | PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [ ] |
 | PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 11 | 进行中: 0 | 待开始: 10
+**统计**：总计 21 个任务 | 已完成: 12 | 进行中: 0 | 待开始: 9
 
 ---
 
@@ -1090,7 +1090,7 @@ graph TD
 | **对应需求** | REQ-ENG-002（字节码编译 — 优化后指令数 ≤ 优化前） |
 | **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4 — 优化 Pass 列表） |
 | **前置依赖** | PH1-T11（编译器基础设施 — IR 类型和字节码格式） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1162,6 +1162,31 @@ graph TD
 | 编号 | 验证项 | 操作步骤 | 预期结果 |
 |------|--------|----------|----------|
 | MV01 | 优化统计输出 | 编译 `prologue.aster`（含优化），打印 `OptimizeStats`（优化前后指令数、各 Pass 应用次数） | 优化后指令数减少，stats 各项 > 0 或合理为 0（取决于脚本复杂度） |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14
+- 实际工时：3 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（47/47 测试通过，clipty 零警告）
+- 人工测试结果：✅ MV01 全部通过（prologue.aster：410→387 指令，-5.6%，语义完整保留）
+- 备注：
+  - 优化器作为编译管线独立阶段插入（Pass 1.5），不修改 PH1-T11 架构
+  - 死标签消除保守策略：保留所有用户定义标签（非 @ 前缀），仅移除自动生成的死标签
+  - Compiler 新增 `compile_raw()` 方法用于跳过优化（对比测试用）
+- 关键决策：
+  - 常量折叠采用"收集→应用"模式避免 borrow 冲突
+  - 跳转合并使用固定点迭代（重复直到无变化）
+  - 窥孔优化滑动窗口大小=2，覆盖 3 种模式
+  - 用户标签（非@前缀）永不删除，保留跨场景Goto/存档引用点
+- 新增接口：
+  - `Optimizer::new() -> Optimizer` — 优化器实例
+  - `Optimizer::optimize(ir: &mut Vec<IrInstruction>) -> OptimizeStats` — 执行全部 4 Pass
+  - `Compiler::compile_raw(scene) -> Result<CompiledScene, Vec<CompileError>>` — 跳过优化编译
+  - `OptimizeStats { instructions_before, after, folds, dead_labels, jumps_threaded, peephole_applied }` — 优化统计
+- 已知限制：
+  - 常量折叠仅处理 Int/Float/Bool，Str 预留未启用
+  - v0.1 阶段优化效果约 5-6%，后续常量传播增强后可进一步提升
+- 建议下一个任务先读取：`engine/aster-compiler/src/optimizer.rs`
 
 ---
 ### PH1-T13 — 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch

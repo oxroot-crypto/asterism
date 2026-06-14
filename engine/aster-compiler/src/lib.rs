@@ -71,8 +71,10 @@ pub mod bytecode;
 pub mod compiler;
 pub mod error;
 pub mod ir;
+pub mod optimizer;
 
 // 重导出 — 外部 crate 通过 `aster_compiler::` 路径直接使用
 pub use bytecode::{CompiledScene, Opcode};
 pub use compiler::Compiler;
 pub use error::CompileError;
+pub use optimizer::{OptimizeStats, Optimizer};

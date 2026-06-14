@@ -112,7 +112,22 @@ impl Compiler {
     /// let result = compiler.compile(&scene);
     /// assert!(result.is_ok());
     /// ```
-    pub fn compile(mut self, scene: &Scene) -> Result<CompiledScene, Vec<CompileError>> {
+    /// 编译并启用全部 4 个优化 Pass。
+    pub fn compile(self, scene: &Scene) -> Result<CompiledScene, Vec<CompileError>> {
+        self.compile_impl(scene, true)
+    }
+
+    /// 编译但跳过优化 Pass（用于对比优化效果）。
+    pub fn compile_raw(self, scene: &Scene) -> Result<CompiledScene, Vec<CompileError>> {
+        self.compile_impl(scene, false)
+    }
+
+    /// 编译实现 — `optimize` 控制是否启用优化 Pass。
+    fn compile_impl(
+        mut self,
+        scene: &Scene,
+        optimize: bool,
+    ) -> Result<CompiledScene, Vec<CompileError>> {
         // Pass 0: 预处理 — 收集字符串 + 标签
         self.collect_strings(scene);
 
@@ -122,6 +137,11 @@ impl Compiler {
         // 如果有错误则立即返回
         if !self.errors.is_empty() {
             return Err(std::mem::take(&mut self.errors));
+        }
+
+        // Pass 1.5: IR 优化（PH1-T12）
+        if optimize {
+            crate::optimizer::Optimizer::new().optimize(&mut self.ir);
         }
 
         // Pass 2: 编码字节码

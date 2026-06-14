@@ -10,6 +10,8 @@
 //! 运行方式：
 //!   cargo run --package aster-compiler --example compile_prologue
 
+use std::collections::HashSet;
+
 use aster_compiler::Compiler;
 use aster_parser::parse_script;
 
@@ -56,108 +58,165 @@ fn main() {
         }
     };
 
-    // 第2步：编译
+    // 第2步：编译（优化前 vs 优化后对比）
     println!();
-    println!("─── 第2步：编译 → 字节码 ───");
-    let compiler = Compiler::new();
-    match compiler.compile(&scene) {
-        Ok(compiled) => {
-            println!("✅ 编译成功");
-            println!();
-            println!("┌─────────────────────────────────────────┐");
-            println!("│  CompiledScene 统计                      │");
-            println!("├─────────────────────────────────────────┤");
-            println!("│ 版本号:     {:>30} │", compiled.version);
-            println!("│ 字节码大小: {:>27} 字节 │", compiled.instructions.len());
-            println!(
-                "│ 指令数量:   {:>30} │",
-                count_instructions(&compiled.instructions)
-            );
-            println!("│ 常量池条目: {:>29} │", compiled.constant_pool.len());
-            println!("│ 标签数量:   {:>30} │", compiled.label_table.len());
-            println!("└─────────────────────────────────────────┘");
+    println!("─── 第2步：编译 → 字节码（优化前后对比）───");
 
-            // 常量池内容
-            println!();
-            println!("─── 常量池内容 ───");
-            for (idx, entry) in compiled.constant_pool.iter().enumerate() {
-                let display = if entry.len() > 60 {
-                    // 找最近的有效 UTF-8 字符边界
-                    let mut end = 57;
-                    while end > 0 && !entry.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    format!("{}...", &entry[..end])
-                } else {
-                    entry.clone()
-                };
-                println!("  [{:3}] {}", idx, display);
-            }
+    // 2a：无优化编译
+    let raw = Compiler::new().compile_raw(&scene).expect("原始编译失败");
+    let raw_instr = count_instructions(&raw.instructions);
 
-            // 标签表
-            if !compiled.label_table.is_empty() {
-                println!();
-                println!("─── 标签表 ───");
-                let mut labels: Vec<(&String, &usize)> = compiled.label_table.iter().collect();
-                labels.sort_by_key(|(_, offset)| *offset);
-                for (name, offset) in &labels {
-                    println!("  0x{:04X} → {}", offset, name);
-                }
-            }
+    // 2b：优化编译
+    let optimized = Compiler::new().compile(&scene).expect("优化编译失败");
+    let opt_instr = count_instructions(&optimized.instructions);
 
-            // 字节码十六进制预览（前 256 字节）
-            println!();
-            println!("─── 字节码预览（前 256 字节）───");
-            let preview_len = compiled.instructions.len().min(256);
-            for (i, chunk) in compiled.instructions[..preview_len].chunks(16).enumerate() {
-                print!("  {:04X}: ", i * 16);
-                for byte in chunk {
-                    print!("{:02X} ", byte);
-                }
-                // 对齐
-                if chunk.len() < 16 {
-                    for _ in 0..(16 - chunk.len()) {
-                        print!("   ");
-                    }
-                }
-                print!(" ");
-                // ASCII 可视化
-                for byte in chunk {
-                    if byte.is_ascii_graphic() || *byte == b' ' {
-                        print!("{}", *byte as char);
-                    } else {
-                        print!(".");
-                    }
-                }
-                println!();
-            }
-            if compiled.instructions.len() > 256 {
-                println!("  ... (剩余 {} 字节)", compiled.instructions.len() - 256);
-            }
+    println!("✅ 编译成功");
+    println!();
+    println!("┌──────────────────────┬──────────┬──────────┬──────────┐");
+    println!("│ 指标                 │ 优化前    │ 优化后    │ 变化      │");
+    println!("├──────────────────────┼──────────┼──────────┼──────────┤");
+    println!(
+        "│ 字节码大小           │ {:>7} B  │ {:>7} B  │ {:>+5} B  │",
+        raw.instructions.len(),
+        optimized.instructions.len(),
+        optimized.instructions.len() as isize - raw.instructions.len() as isize
+    );
+    println!(
+        "│ 指令数量             │ {:>7}    │ {:>7}    │ {:>+5}    │",
+        raw_instr,
+        opt_instr,
+        opt_instr as isize - raw_instr as isize
+    );
+    println!(
+        "│ 常量池条目           │ {:>7}    │ {:>7}    │   不变   │",
+        raw.constant_pool.len(),
+        optimized.constant_pool.len()
+    );
+    println!(
+        "│ 标签数量             │ {:>7}    │ {:>7}    │   不变   │",
+        raw.label_table.len(),
+        optimized.label_table.len()
+    );
+    let reduction = if raw_instr > 0 {
+        ((raw_instr - opt_instr) as f64 / raw_instr as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!(
+        "│ 指令缩减比例         │          │ {:>5.1}%   │          │",
+        reduction
+    );
+    println!("└──────────────────────┴──────────┴──────────┴──────────┘");
 
-            // 操作码分布统计
-            println!();
-            println!("─── 操作码分布 ───");
-            let op_counts = count_opcodes(&compiled.instructions);
-            let mut sorted: Vec<(String, usize)> = op_counts.into_iter().collect();
-            sorted.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
-            for (name, count) in &sorted {
-                println!("  {}: {} 次", name, count);
-            }
-
-            println!();
-            println!("═══════════════════════════════════════════");
-            println!("  验证完成 ✅");
-            println!("═══════════════════════════════════════════");
+    // 语义等价验证
+    println!();
+    println!("─── 语义等价验证 ───");
+    let pool_match = raw.constant_pool == optimized.constant_pool;
+    println!(
+        "  常量池一致:    {}",
+        if pool_match { "✅" } else { "❌ 不一致!" }
+    );
+    let raw_labels: HashSet<&String> = raw.label_table.keys().collect();
+    let opt_labels: HashSet<&String> = optimized.label_table.keys().collect();
+    let labels_match = raw_labels == opt_labels;
+    println!(
+        "  标签名一致:    {}",
+        if labels_match {
+            "✅"
+        } else {
+            "❌ 不一致!"
         }
-        Err(errors) => {
-            eprintln!("❌ 编译失败 ({} 个错误):", errors.len());
-            for e in &errors {
-                eprintln!("   - {}", e);
+    );
+    let raw_has_end = raw.instructions.last() == Some(&0xFF);
+    let opt_has_end = optimized.instructions.last() == Some(&0xFF);
+    println!("  优化前 End:    {}", if raw_has_end { "✅" } else { "❌" });
+    println!("  优化后 End:    {}", if opt_has_end { "✅" } else { "❌" });
+    let no_increase = optimized.instructions.len() <= raw.instructions.len();
+    println!("  指令不增加:    {}", if no_increase { "✅" } else { "❌" });
+    println!(
+        "  总体语义保留:  {}",
+        if pool_match && labels_match && raw_has_end && opt_has_end && no_increase {
+            "✅ 通过"
+        } else {
+            "❌ 失败"
+        }
+    );
+
+    // 使用优化后的结果展示详情
+    let compiled = optimized;
+
+    // 常量池内容
+    println!();
+    println!("─── 常量池内容 ───");
+    for (idx, entry) in compiled.constant_pool.iter().enumerate() {
+        let display = if entry.len() > 60 {
+            // 找最近的有效 UTF-8 字符边界
+            let mut end = 57;
+            while end > 0 && !entry.is_char_boundary(end) {
+                end -= 1;
             }
-            std::process::exit(1);
+            format!("{}...", &entry[..end])
+        } else {
+            entry.clone()
+        };
+        println!("  [{:3}] {}", idx, display);
+    }
+
+    // 标签表
+    if !compiled.label_table.is_empty() {
+        println!();
+        println!("─── 标签表 ───");
+        let mut labels: Vec<(&String, &usize)> = compiled.label_table.iter().collect();
+        labels.sort_by_key(|(_, offset)| *offset);
+        for (name, offset) in &labels {
+            println!("  0x{:04X} → {}", offset, name);
         }
     }
+
+    // 字节码十六进制预览（前 256 字节）
+    println!();
+    println!("─── 字节码预览（前 256 字节）───");
+    let preview_len = compiled.instructions.len().min(256);
+    for (i, chunk) in compiled.instructions[..preview_len].chunks(16).enumerate() {
+        print!("  {:04X}: ", i * 16);
+        for byte in chunk {
+            print!("{:02X} ", byte);
+        }
+        // 对齐
+        if chunk.len() < 16 {
+            for _ in 0..(16 - chunk.len()) {
+                print!("   ");
+            }
+        }
+        print!(" ");
+        // ASCII 可视化
+        for byte in chunk {
+            if byte.is_ascii_graphic() || *byte == b' ' {
+                print!("{}", *byte as char);
+            } else {
+                print!(".");
+            }
+        }
+        println!();
+    }
+    if compiled.instructions.len() > 256 {
+        println!("  ... (剩余 {} 字节)", compiled.instructions.len() - 256);
+    }
+
+    // 操作码分布统计
+    println!();
+    println!("─── 操作码分布 ───");
+    let op_counts = count_opcodes(&compiled.instructions);
+    let mut sorted: Vec<(String, usize)> = op_counts.into_iter().collect();
+    sorted.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+    for (name, count) in &sorted {
+        println!("  {}: {} 次", name, count);
+    }
+
+    println!();
+    println!("═══════════════════════════════════════════");
+    println!("  验证完成 ✅");
+    println!("═══════════════════════════════════════════");
 }
 
 /// 统计字节码中的指令数量（通过扫描操作码并跳转到下一条指令）。
