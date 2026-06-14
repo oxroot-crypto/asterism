@@ -12,7 +12,9 @@
 //!   cargo run --package aster-renderer --example integration_demo
 //!
 //! 交互：
-//!   - N / Enter / Space  推进对话（下一段文本）
+//!   - N / Enter / Space  推进对话（下一段文本，含打字机效果）
+//!   - S / 鼠标左键       跳过打字机动画（立即显示全部）
+//!   - Z / X              切换打字机速度档位
 //!   - 1 / 2 / 3          切换角色立绘显隐
 //!   - A                  切换透明度动画
 //!   - R                  替换中央角色表情
@@ -24,10 +26,11 @@
 //! 创建日期：2026-06-14
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use aster_renderer::{
     BackgroundLayer, FitMode, GpuContext, Layer, RenderConfig, SpriteDescriptor, SpriteLayer,
-    SpritePosition, TextConfig, TextRenderer, Texture,
+    SpritePosition, TextConfig, TextRenderer, Texture, Typewriter, TypewriterSpeed,
 };
 use winit::{
     application::ApplicationHandler,
@@ -234,6 +237,10 @@ struct App {
     sprite_layer: Option<SpriteLayer>,
     /// 文本渲染器
     text_renderer: Option<TextRenderer>,
+    /// 打字机状态机
+    typewriter: Typewriter,
+    /// 上一帧时间戳（用于计算 delta_time）
+    last_frame_time: Option<Instant>,
     /// 渲染配置
     config: RenderConfig,
     /// 文本配置
@@ -273,6 +280,8 @@ impl App {
             bg_layer: None,
             sprite_layer: None,
             text_renderer: None,
+            typewriter: Typewriter::new(TypewriterSpeed::Normal),
+            last_frame_time: None,
             config,
             text_config,
             frame_count: 0,
@@ -308,7 +317,7 @@ impl App {
 
         eprintln!("╔══════════════════════════════════════════╗");
         eprintln!("║   Asterism 集成渲染测试                  ║");
-        eprintln!("║   PH1-T07 背景 + T08 立绘 + T09 文本    ║");
+        eprintln!("║   T07背景+T08立绘+T09文本+T10打字机     ║");
         eprintln!("╚══════════════════════════════════════════╝");
         eprintln!();
 
@@ -362,10 +371,16 @@ impl App {
         eprintln!("[T09] 初始化文本渲染器...");
         let mut text_renderer =
             TextRenderer::new(device, queue, format, w, h, self.text_config.clone())?;
-        // 设置初始对话
+        // 设置初始对话（使用打字机效果）
         let (speaker, body) = DIALOGUES[self.dialogue_index];
         text_renderer.set_text(speaker, body);
         text_renderer.prepare(device, queue);
+        // 初始化打字机
+        self.typewriter.reset(body);
+        if !self.typewriter.is_complete() {
+            text_renderer.set_visible_range(0, 0); // 从零字符开始
+            text_renderer.prepare(device, queue);
+        }
         eprintln!(
             "  ✓ 文本渲染器就绪 — 对话 #{idx}: 「{speaker}」\"{body}\"",
             idx = self.dialogue_index,
@@ -376,6 +391,7 @@ impl App {
             },
             body = truncate_str(body, 20),
         );
+        eprintln!("  ✓ 打字机效果就绪 — Normal(30ms/char)");
 
         self.bg_layer = Some(bg_layer);
         self.sprite_layer = Some(sprite_layer);
@@ -384,14 +400,14 @@ impl App {
 
         eprintln!();
         eprintln!(
-            "  按键: N/Enter=下一句 · 1/2/3=显隐 · A=渐变 · R=替换表情 · T=隐藏文本 · Q=退出"
+            "  按键: N/Enter=下一句 · S/鼠标=跳过 · Z/X=速度 · 1/2/3=显隐 · A=动画 · R=表情 · Q=退出"
         );
         eprintln!();
 
         Ok(())
     }
 
-    /// 渲染一帧：清屏 → 背景 → 立绘 → 文本 → present。
+    /// 渲染一帧：打字机推进 → 清屏 → 背景 → 立绘 → 文本 → present。
     fn render(&mut self) {
         let gpu = match self.gpu.as_ref() {
             Some(g) => g,
@@ -407,6 +423,20 @@ impl App {
         };
 
         self.frame_count += 1;
+
+        // ── 打字机推进 ──
+        let now = Instant::now();
+        if let Some(last) = self.last_frame_time {
+            let dt = now.duration_since(last);
+            if self.typewriter.update(dt)
+                && let Some(ref mut renderer) = self.text_renderer
+            {
+                // 同步可见范围到 TextRenderer
+                renderer.set_visible_range(0, self.typewriter.visible_chars());
+                renderer.prepare(gpu.device(), gpu.queue());
+            }
+        }
+        self.last_frame_time = Some(now);
 
         // 透明度动画
         if self.alpha_animating {
@@ -469,8 +499,17 @@ impl App {
         // 帧状态日志
         if self.frame_count.is_multiple_of(180) {
             let (speaker, _body) = DIALOGUES[self.dialogue_index];
+            let tw_progress = if self.typewriter.is_complete() {
+                "✓完成".to_string()
+            } else {
+                format!(
+                    "{}/{}",
+                    self.typewriter.visible_chars(),
+                    self.typewriter.total_chars()
+                )
+            };
             eprintln!(
-                "[frame {n:>4}] 对话 #{idx}: {spk} | L:{l} C:{c} R:{r} | txt:{t} anim:{anim}",
+                "[frame {n:>4}] 对话 #{idx}: {spk} | L:{l} C:{c} R:{r} | 打字机:{tw} | txt:{t} anim:{anim}",
                 n = self.frame_count,
                 idx = self.dialogue_index,
                 spk = if speaker.is_empty() {
@@ -481,6 +520,7 @@ impl App {
                 l = if self.left_visible { "●" } else { "○" },
                 c = if self.center_visible { "●" } else { "○" },
                 r = if self.right_visible { "●" } else { "○" },
+                tw = tw_progress,
                 t = if self.text_visible { "●" } else { "○" },
                 anim = if self.alpha_animating {
                     format!("α={:.2}", self.alpha_value)
@@ -510,12 +550,71 @@ impl App {
             body = body,
         );
 
+        // 重置打字机，开始逐字显示新文本
+        self.typewriter.reset(body);
+
         if let Some(ref gpu) = self.gpu
             && let Some(ref mut renderer) = self.text_renderer
         {
             renderer.set_text(speaker, body);
+            // 从 0 字符开始（仅显示说话者名字）
+            renderer.set_visible_range(0, 0);
             renderer.prepare(gpu.device(), gpu.queue());
         }
+    }
+
+    /// 跳过当前打字机动画（立即显示全部文本）。
+    fn skip_typewriter(&mut self) {
+        if self.typewriter.is_complete() {
+            return; // 已完成，无需跳过
+        }
+
+        self.typewriter.skip();
+        eprintln!(
+            "[typewriter] ⏭ 跳过动画 — 全部 {}/{} 字符可见",
+            self.typewriter.visible_chars(),
+            self.typewriter.total_chars()
+        );
+
+        // 同步到 TextRenderer
+        if let Some(ref gpu) = self.gpu
+            && let Some(ref mut renderer) = self.text_renderer
+        {
+            renderer.clear_visible_range(); // 恢复显示全部
+            renderer.prepare(gpu.device(), gpu.queue());
+        }
+    }
+
+    /// 切换打字机速度档位。
+    fn change_speed(&mut self, next: bool) {
+        let speeds = [
+            TypewriterSpeed::Instant,
+            TypewriterSpeed::Slow,
+            TypewriterSpeed::Normal,
+            TypewriterSpeed::Fast,
+            TypewriterSpeed::Custom(10.0),
+        ];
+
+        let current = self.typewriter.speed();
+        let current_idx = speeds.iter().position(|s| s == &current).unwrap_or(2);
+
+        let new_idx = if next {
+            (current_idx + 1) % speeds.len()
+        } else {
+            (current_idx + speeds.len() - 1) % speeds.len()
+        };
+
+        let new_speed = speeds[new_idx];
+        self.typewriter.set_speed(new_speed);
+
+        let speed_name = match new_speed {
+            TypewriterSpeed::Instant => "Instant (瞬间)",
+            TypewriterSpeed::Slow => "Slow (50ms/char)",
+            TypewriterSpeed::Normal => "Normal (30ms/char)",
+            TypewriterSpeed::Fast => "Fast (15ms/char)",
+            TypewriterSpeed::Custom(ms) => &*format!("Custom ({ms:.0}ms/char)"),
+        };
+        eprintln!("[typewriter] 速度切换 → {speed_name}");
     }
 
     /// 切换文本显隐。
@@ -724,8 +823,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let title =
-            "Asterism — 集成渲染测试 (T07背景+T08立绘+T09文本) | N=下一句 Q=退出".to_string();
+        let title = "Asterism — 集成测试 (T10打字机) | N=下一句 S=跳过 Z/X=速度 Q=退出".to_string();
         let window_attrs = Window::default_attributes()
             .with_title(title)
             .with_inner_size(winit::dpi::LogicalSize::new(
@@ -781,6 +879,17 @@ impl ApplicationHandler for App {
                     | PhysicalKey::Code(KeyCode::Space) => {
                         self.advance_dialogue();
                     }
+                    // 跳过打字机动画
+                    PhysicalKey::Code(KeyCode::KeyS) => {
+                        self.skip_typewriter();
+                    }
+                    // 切换打字机速度
+                    PhysicalKey::Code(KeyCode::KeyZ) => {
+                        self.change_speed(false); // 上一档
+                    }
+                    PhysicalKey::Code(KeyCode::KeyX) => {
+                        self.change_speed(true); // 下一档
+                    }
                     // 文本显隐
                     PhysicalKey::Code(KeyCode::KeyT) => {
                         self.toggle_text_visibility();
@@ -812,6 +921,14 @@ impl ApplicationHandler for App {
                 self.on_resize(new_size.width, new_size.height);
             }
 
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                self.skip_typewriter();
+            }
+
             WindowEvent::RedrawRequested => {
                 self.update_alpha_animation();
                 self.render();
@@ -839,11 +956,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("║   PH1-T07  背景图层渲染    ✓               ║");
     eprintln!("║   PH1-T08  角色立绘渲染    ✓               ║");
     eprintln!("║   PH1-T09  文本渲染        ✓               ║");
+    eprintln!("║   PH1-T10  打字机效果      ✓               ║");
     eprintln!("╠══════════════════════════════════════════════╣");
     eprintln!("║  场景：黄昏教室，小百合在等你                ║");
     eprintln!("║  角色：小百合(左) · 茜(中) · 学长(右)        ║");
     eprintln!("╠══════════════════════════════════════════════╣");
-    eprintln!("║  N / Enter / Space  推进对话                ║");
+    eprintln!("║  N / Enter / Space  推进对话（打字机）      ║");
+    eprintln!("║  S / 鼠标左键       跳过打字机动画          ║");
+    eprintln!("║  Z / X              切换打字机速度          ║");
     eprintln!("║  T                  切换文本显隐            ║");
     eprintln!("║  1 / 2 / 3          切换角色显隐            ║");
     eprintln!("║  A                  透明度动画              ║");

@@ -36,6 +36,7 @@ pub mod layer_manager;
 pub mod sprite_layer;
 pub mod text_renderer;
 pub mod texture;
+pub mod typewriter;
 
 // ============================================================================
 // 公开导出 — 核心类型
@@ -48,3 +49,4 @@ pub use layer_manager::{Layer, LayerManager};
 pub use sprite_layer::{Sprite, SpriteDescriptor, SpriteLayer, SpritePosition};
 pub use text_renderer::{TextConfig, TextRenderer};
 pub use texture::{Texture, create_texture_bind_group_layout};
+pub use typewriter::{Typewriter, TypewriterSpeed};

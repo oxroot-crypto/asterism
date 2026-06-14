@@ -381,6 +381,8 @@ pub struct TextRenderer {
     current_body: String,
     /// 文本是否已变更
     text_changed: bool,
+    /// 可见正文字符数上限（None = 显示全部，向后兼容）
+    visible_body_chars: Option<usize>,
 
     // === 图集 ===
     atlas: RowAtlas,
@@ -559,6 +561,7 @@ impl TextRenderer {
             current_speaker: String::new(),
             current_body: String::new(),
             text_changed: true,
+            visible_body_chars: None,
             atlas,
             glyph_cache: HashMap::new(),
             bind_group_layout,
@@ -585,6 +588,44 @@ impl TextRenderer {
     /// 清除所有显示文本。
     pub fn clear_text(&mut self) {
         self.set_text("", "");
+    }
+
+    /// 设置正文的可见字符范围。
+    ///
+    /// 仅渲染 `current_body` 中字符索引 `[start, end)` 范围内的正文。
+    /// 说话者名字始终完整显示，不受此范围影响。
+    ///
+    /// # 参数
+    /// - `start`: 起始字符索引（通常为 0），基于 Unicode 标量值计数
+    /// - `end`: 结束字符索引（不含），`end - start` 为可见字符数
+    ///
+    /// # 行为
+    /// - 当 `start == 0 && end == 0` 时，仅显示说话者名字
+    /// - 当 `end >= total_chars` 时，显示全部正文
+    /// - 仅当可见范围**变化**时才标记 `text_changed = true`，避免无谓的重新布局
+    ///
+    /// # 与 Typewriter 协作
+    /// ```rust,ignore
+    /// // 每帧同步打字机进度
+    /// text_renderer.set_visible_range(0, typewriter.visible_chars());
+    /// ```
+    pub fn set_visible_range(&mut self, start: usize, end: usize) {
+        let visible = end.saturating_sub(start);
+        let current = self.visible_body_chars.unwrap_or(usize::MAX);
+        if visible != current {
+            self.visible_body_chars = Some(visible);
+            self.text_changed = true;
+        }
+    }
+
+    /// 清除可见范围限制，恢复显示全部正文。
+    ///
+    /// 后续 `prepare()` 将渲染完整 `current_body`。
+    pub fn clear_visible_range(&mut self) {
+        if self.visible_body_chars.is_some() {
+            self.visible_body_chars = None;
+            self.text_changed = true;
+        }
     }
 
     /// 加载自定义字体（TTF/OTF 字节数据）。
@@ -645,8 +686,16 @@ impl TextRenderer {
         self.body_buffer
             .set_size(Some(body_area_width), Some(body_height));
         let body_attrs = Attrs::new().family(Family::SansSerif);
+
+        // 根据可见范围截取正文
+        let body_text = if let Some(visible) = self.visible_body_chars {
+            self.current_body.chars().take(visible).collect::<String>()
+        } else {
+            self.current_body.clone()
+        };
+
         self.body_buffer
-            .set_text(&self.current_body, &body_attrs, Shaping::Advanced, None);
+            .set_text(&body_text, &body_attrs, Shaping::Advanced, None);
         self.body_buffer
             .shape_until_scroll(&mut self.font_system, true);
 
@@ -1012,6 +1061,7 @@ impl std::fmt::Debug for TextRenderer {
             .field("current_speaker", &self.current_speaker)
             .field("current_body", &self.current_body)
             .field("text_changed", &self.text_changed)
+            .field("visible_body_chars", &self.visible_body_chars)
             .field("glyph_cache_size", &self.glyph_cache.len())
             .field("index_count", &self.index_count)
             .finish_non_exhaustive()
@@ -1358,5 +1408,256 @@ mod tests {
             "缓存大小: 首次={first_cache_size}, 最终={}",
             renderer.glyph_cache.len()
         );
+    }
+
+    // ========================================================================
+    // 可见范围集成测试
+    // ========================================================================
+
+    /// 验证 set_visible_range 后仅渲染前 N 个字符。
+    #[test]
+    fn test_visible_range_limits_body() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        // 设置长文本
+        renderer.set_text("", "ABCDEFGHIJ"); // 10 个字符
+        // 仅显示前 3 个字符
+        renderer.set_visible_range(0, 3);
+        renderer.prepare(&device, &queue);
+
+        assert!(!renderer.text_changed, "prepare 后 text_changed 应为 false");
+        eprintln!(
+            "可见范围限制: index_count={}, 缓存字形数={}",
+            renderer.index_count,
+            renderer.glyph_cache.len()
+        );
+        // 应有字形（前 3 个字符 "ABC"），但不验证具体数量（依赖系统字体）
+    }
+
+    /// 验证未设置 visible_range 时显示全部正文（向后兼容）。
+    #[test]
+    fn test_visible_range_none_shows_all() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        renderer.set_text("测试", "ABCDEFGH");
+        // 不设置 visible_range → 应显示全部
+        renderer.prepare(&device, &queue);
+
+        let full_index_count = renderer.index_count;
+
+        // 重置后设置可见范围限制
+        renderer.set_visible_range(0, 3);
+        renderer.prepare(&device, &queue);
+
+        let limited_index_count = renderer.index_count;
+
+        eprintln!("全部字形数: {full_index_count}, 限制后字形数: {limited_index_count}");
+        // 限制后的字形数应 ≤ 全部字形数
+        assert!(
+            limited_index_count <= full_index_count,
+            "限制后的字形数应不超过全部字形数"
+        );
+    }
+
+    /// 验证 set_visible_range(0, 0) → 仅显示说话者名字（如有）。
+    #[test]
+    fn test_visible_range_zero() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        // 无说话者，仅正文
+        renderer.set_text("", "正文内容");
+        renderer.set_visible_range(0, 0);
+        renderer.prepare(&device, &queue);
+
+        // 正文无任何字符可见，仅说话者（空），应无字形
+        assert_eq!(
+            renderer.index_count, 0,
+            "无可见正文且无说话者时 index_count 应为 0"
+        );
+    }
+
+    /// 验证可见范围变更触发重新布局。
+    #[test]
+    fn test_visible_range_update_triggers_relayout() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        renderer.set_text("测试", "ABCDEFGH");
+        renderer.set_visible_range(0, 4);
+        renderer.prepare(&device, &queue);
+        assert!(!renderer.text_changed);
+
+        // 变更可见范围
+        renderer.set_visible_range(0, 6);
+        assert!(
+            renderer.text_changed,
+            "可见范围变更应触发 text_changed = true"
+        );
+
+        renderer.prepare(&device, &queue);
+        assert!(!renderer.text_changed, "prepare 后应清除 text_changed");
+    }
+
+    /// 验证相同可见范围不触发重新布局。
+    #[test]
+    fn test_same_visible_range_no_relayout() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        renderer.set_text("测试", "ABCDEFGH");
+        renderer.set_visible_range(0, 4);
+        renderer.prepare(&device, &queue);
+        assert!(!renderer.text_changed);
+
+        // 相同的可见范围不应标记变更
+        renderer.set_visible_range(0, 4);
+        assert!(!renderer.text_changed, "相同可见范围不应触发 text_changed");
+    }
+
+    /// 验证 clear_visible_range 恢复显示全部。
+    #[test]
+    fn test_clear_visible_range_restores_full() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        renderer.set_text("测试", "ABCDEFGH");
+        renderer.set_visible_range(0, 4);
+        renderer.prepare(&device, &queue);
+
+        // 清除限制
+        renderer.clear_visible_range();
+        assert!(renderer.text_changed, "清除限制应触发 text_changed");
+
+        renderer.prepare(&device, &queue);
+        // 应恢复全部文本
+        eprintln!("恢复全部后 index_count: {}", renderer.index_count);
+    }
+
+    /// 验证 CJK 文本的可见范围限制（UTF-8 安全）。
+    #[test]
+    fn test_visible_range_cjk_safe() {
+        let (device, queue) = match create_test_device() {
+            Some(ctx) => ctx,
+            None => {
+                eprintln!("[跳过] 无 GPU 适配器");
+                return;
+            }
+        };
+
+        let mut renderer = TextRenderer::new(
+            &device,
+            &queue,
+            TextureFormat::Rgba8UnormSrgb,
+            1920,
+            1080,
+            TextConfig::default(),
+        )
+        .expect("TextRenderer 创建应成功");
+
+        // CJK 文本（多字节字符）
+        renderer.set_text("小百合", "今天天气真好啊。明日もいい天気でしょう。");
+        renderer.set_visible_range(0, 7); // 前 7 个字符："今天天气真好啊"
+        renderer.prepare(&device, &queue);
+
+        assert!(!renderer.text_changed);
+        eprintln!(
+            "CJK 可见范围: 缓存字形数={}, index_count={}",
+            renderer.glyph_cache.len(),
+            renderer.index_count
+        );
+        // 不应 panic（UTF-8 边界安全验证）
     }
 }

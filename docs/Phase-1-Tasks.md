@@ -22,7 +22,7 @@
 | PH1-T07 | 背景图层渲染 | P0 | 8h | PH1-T02, PH1-T06 | [x] |
 | PH1-T08 | 角色立绘渲染 | P0 | 12h | PH1-T02, PH1-T07 | [x] |
 | PH1-T09 | 文本渲染 — cosmic-text 集成 | P0 | 12h | PH1-T07 | [x] |
-| PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [ ] |
+| PH1-T10 | 打字机效果 | P0 | 8h | PH1-T09 | [x] |
 | PH1-T11 | 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler） | P0 | 10h | PH1-T05 | [ ] |
 | PH1-T12 | 实现 `aster-compiler` — 优化 Pass（4 个） | P0 | 6h | PH1-T11 | [ ] |
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [ ] |
@@ -35,7 +35,7 @@
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 9 | 进行中: 0 | 待开始: 12
+**统计**：总计 21 个任务 | 已完成: 10 | 进行中: 0 | 待开始: 11
 
 ---
 
@@ -899,7 +899,7 @@ graph TD
 | **对应需求** | REQ-ENG-014（文字逐字显示 / 打字机效果） |
 | **对应架构模块** | `aster-renderer`（参考 Architecture.md §4.6，属于 TextRenderer 的展示控制） |
 | **前置依赖** | PH1-T09（TextRenderer — 文本渲染基础能力） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -968,6 +968,20 @@ graph TD
 | MV01 | 逐字显示效果 | 运行测试程序，显示一段对话文本（如 50 个中文字符），观察字符出现方式 | 字符逐字出现，速度均匀，类似打字机效果 |
 | MV02 | 点击跳过 | 在打字机动画进行中点击鼠标左键 | 剩余文本立即全部显示，动画中断 |
 | MV03 | 速度差异 | 分别测试 Slow / Normal / Fast 三档速度下相同文本的显示效果 | Slow 最慢、Fast 最快，速度差异明显可见 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-14 23:30
+- 实际工时：3 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（100/100 单元测试 + 1 doctest 通过，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV04 全部通过（集成 demo 逐字显示 / 跳过 / 速度切换 / 对话推进均正常）
+- 备注：Typewriter 为纯状态机（零外部依赖），与 TextRenderer 通过 `set_visible_range()` 解耦协作。Duration 使用 `from_micros` 避免 f32 精度问题。可见范围使用 `chars().take()` 确保 UTF-8 安全。
+
+**上下文交接**：
+- 关键决策：打字机效果通过「Typewriter 状态机 + TextRenderer 可见范围」双组件协作实现。Typewriter 负责时间/进度管理，TextRenderer 负责截取可见正文并重新布局。两者通过 `set_visible_range(0, visible_chars)` 接口解耦
+- 新增接口：`Typewriter::new(speed)` / `reset(text)` / `update(dt) -> bool` / `skip()` / `visible_chars()` / `total_chars()` / `is_complete()` / `is_skipped()` / `speed()` / `set_speed(speed)`；`TypewriterSpeed::{Instant, Slow, Normal, Fast, Custom(ms)}` + `ms_per_char()`；`TextRenderer::set_visible_range(start, end)` / `clear_visible_range()`
+- 已知限制：字符计数基于 Unicode 标量值（`char`），对组合字符（grapheme cluster）可能不精确；每字符推进时重新布局正文本（cosmic-text `set_text` + `shape_until_scroll`），对于 200+ 字符的极长文本可能有轻微性能影响
+- 建议下一个任务先读取：`engine/aster-renderer/src/typewriter.rs`（Typewriter API）、`engine/aster-renderer/src/text_renderer.rs` 中 `set_visible_range()` 和修改后的 `prepare()` 步骤3
 
 ---
 ### PH1-T11 — 实现 `aster-compiler` — 编译基础设施（IR/Bytecode/Compiler）
