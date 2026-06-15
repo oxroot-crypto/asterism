@@ -36,6 +36,13 @@ pub trait Renderer {
 
     /// 跳过打字机动画，立即显示全部文本。
     fn skip_typewriter(&mut self) {}
+
+    /// 设置可见文本范围（打字机效果控制）。
+    ///
+    /// `start` 为起始字符索引（通常为 0），`end` 为结束字符索引（独占）。
+    /// 仅渲染 `text[start..end]` 范围的字符。
+    /// 默认实现为空操作（无打字机效果时无需此方法）。
+    fn set_visible_range(&mut self, _start: usize, _end: usize) {}
 }
 
 /// 派发引擎命令到渲染器。
@@ -264,6 +271,10 @@ impl Renderer for MockRenderer {
     fn effect(&mut self, t: &str, p: &[(String, u16)]) {
         self.calls
             .push(format!("effect(type=\"{}\", params={:?})", t, p));
+    }
+    fn set_visible_range(&mut self, start: usize, end: usize) {
+        self.calls
+            .push(format!("set_visible_range(start={}, end={})", start, end));
     }
 }
 

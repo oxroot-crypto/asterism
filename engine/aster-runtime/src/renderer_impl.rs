@@ -19,11 +19,10 @@
 use std::collections::HashMap;
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use aster_renderer::{
     BackgroundLayer, Layer, SpriteDescriptor, SpriteLayer, SpritePosition, TextConfig,
-    TextRenderer, Texture, Typewriter, TypewriterSpeed,
+    TextRenderer, Texture,
 };
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
@@ -44,10 +43,6 @@ pub struct GameRenderer {
     texture_cache: HashMap<String, Texture>,
     char_sprites: HashMap<String, (u64, u8)>,
     sprite_ids: HashMap<String, u64>,
-    /// 打字机效果控制器
-    typewriter: Typewriter,
-    /// 上一帧时刻（用于计算 delta）
-    last_frame: Instant,
     /// 项目根目录（用于解析资产相对路径）
     project_root: std::path::PathBuf,
     /// 屏幕尺寸
@@ -92,8 +87,6 @@ impl GameRenderer {
             texture_cache: HashMap::new(),
             char_sprites: HashMap::new(),
             sprite_ids: HashMap::new(),
-            typewriter: Typewriter::new(TypewriterSpeed::Normal),
-            last_frame: Instant::now(),
             project_root,
             screen_width,
             screen_height,
@@ -130,15 +123,6 @@ impl GameRenderer {
                 occlusion_query_set: None,
             });
         }
-
-        // 更新打字机动画并同步可见范围
-        let now = Instant::now();
-        let delta = now.duration_since(self.last_frame);
-        self.last_frame = now;
-        self.typewriter.update(delta);
-        // 始终同步可见字符数（动画中逐步增加，完成后 = total_chars）
-        let visible = self.typewriter.visible_chars();
-        self.text_renderer.set_visible_range(0, visible);
 
         // 排版文字
         self.text_renderer.prepare(&self.device, &self.queue);
@@ -318,12 +302,12 @@ impl Renderer for GameRenderer {
 
     fn set_dialogue(&mut self, speaker: &str, text: &str) {
         self.text_renderer.set_text(speaker, text);
-        self.typewriter.reset(text);
+        // 打字机状态由 DialogueController 管理，GameRenderer 不再持有 Typewriter
     }
 
     fn set_narration(&mut self, text: &str) {
         self.text_renderer.set_text("", text);
-        self.typewriter.reset(text);
+        // 打字机状态由 DialogueController 管理，GameRenderer 不再持有 Typewriter
     }
 
     fn show_menu(&mut self, prompt: &str, choice_texts: &[String]) {
@@ -342,14 +326,9 @@ impl Renderer for GameRenderer {
         self.text_renderer.set_visible_range(0, usize::MAX);
     }
 
-    fn is_typewriter_complete(&self) -> bool {
-        self.typewriter.is_complete()
-    }
-
-    fn skip_typewriter(&mut self) {
-        self.typewriter.skip();
-        let visible = self.typewriter.visible_chars();
-        self.text_renderer.set_visible_range(0, visible);
+    /// 设置可见文本范围，由 DialogueController 驱动打字机效果。
+    fn set_visible_range(&mut self, start: usize, end: usize) {
+        self.text_renderer.set_visible_range(start, end);
     }
 
     fn wait(&mut self, _duration_ms: u64) {}

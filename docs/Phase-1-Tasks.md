@@ -31,11 +31,11 @@
 | PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [x] |
 | PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [x] |
 | PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [x] |
-| PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [ ] |
+| PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [x] |
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 18 | 进行中: 0 | 待开始: 3
+**统计**：总计 21 个任务 | 已完成: 19 | 进行中: 0 | 待开始: 2
 
 ---
 
@@ -1838,7 +1838,7 @@ graph TD
 | **对应需求** | REQ-ENG-014（打字机效果 — 运行时控制）, REQ-ENG-020（点击推进对话） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — DialogueController） |
 | **前置依赖** | PH1-T10（Typewriter 效果）, PH1-T18（SceneManager — 对话命令来源） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1911,6 +1911,20 @@ graph TD
 | MV01 | 打字机中点击跳过 | 在打字机动画进行中点击鼠标左键 | 剩余文本立即全部显示，进入等待推进状态 |
 | MV02 | 连续对话推进 | 完成第一句后点击 → 第二句开始打字机 → 再次点击跳过 → 第三句开始 | 多句对话连续推进流程顺畅，无卡顿或跳过对话 |
 | MV03 | 长按不重复触发 | 在对话等待时长按鼠标左键 | 只触发一次推进（点击一次只推进一句），不连续跳过多句 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-15 17:30
+- 实际工时：4 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（DialogueController 17 个新测试 + SceneManager 72 测试 + 12 doctest 全部通过，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV03 全部通过 + text_speed 配置生效验证通过
+- 备注：DialogueController 持有独立 Typewriter 实例，通过 Renderer trait 的 `set_visible_range` 默认方法同步可见字符数。GameRenderer 原有 Typewriter 字段已移除（状态管理统一到 DialogueController）。修复 `aster.toml` 中 `text_speed` 配置不生效问题（新增 `to_typewriter_speed()` 转换函数读取 `GameContext.default_text_speed`）。
+
+**上下文交接**：
+- 关键决策：DialogueController 持有 Typewriter（从 GameRenderer 中提取），打字机状态单一来源；Renderer trait 新增 `set_visible_range` 默认方法（最小侵入）；SceneManager 的 `process_action` 在 cmd 被 move 前提取对话信息 push 到 DialogueController；`on_click` 完全委托给 DialogueController（Typewriting→skip→WaitingForAdvance，WaitingForAdvance→Advance）
+- 新增接口：`DialogueController::new/ push/ update/ on_click/ reset/ state/ current_speaker/ current_text/ current_visible_chars/ speed/ set_speed/ queue_len`；`DialogueState`/`DialogueAction`/`DialogueLine` 类型；`SceneManager::update_dialogue/ dialogue_controller` 方法；`Renderer::set_visible_range` 默认方法
+- 已知限制：每帧 `sync_dialogue_to_renderer` 需要调用 `set_visible_range`；队列预加载在 Phase 1 未使用（VM 一次只产生一行）；`voice_id` 字段预留 Phase 2
+- 建议下一个任务先读取：`dialogue_controller.rs`（核心状态机）、`scene_manager.rs`（process_action 中的 dialogue push + on_click 委托）、`renderer_impl.rs`（移除 Typewriter 后的简化 render 流程）
 
 ---
 ### PH1-T20 — 实现 InputManager — winit 事件→游戏动作映射

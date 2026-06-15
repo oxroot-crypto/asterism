@@ -35,6 +35,7 @@
 
 // 模块声明
 pub mod command_bridge;
+pub mod dialogue_controller;
 pub mod error;
 pub mod game_context;
 pub mod game_loader;
@@ -44,6 +45,7 @@ pub mod scene_manager;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_runtime::TypeName` 直接引用
 pub use command_bridge::{MockRenderer, Renderer, dispatch};
+pub use dialogue_controller::{DialogueAction, DialogueController, DialogueLine, DialogueState};
 pub use error::RuntimeError;
 pub use game_context::GameContext;
 pub use game_loader::GameLoader;

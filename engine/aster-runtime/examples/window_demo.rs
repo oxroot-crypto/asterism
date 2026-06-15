@@ -1,7 +1,7 @@
-//! Asterism — 引擎集成演示（PH1-T18）
+//! Asterism — 引擎集成演示（PH1-T19 DialogueController 集成）
 //!
 //! 运行：cargo run --package aster-runtime --example window_demo
-//! 操作：鼠标左键/Enter/Space=推进  数字1-9=选择  Esc=退出
+//! 操作：鼠标左键/Enter/Space=推进（打字中=跳过，完成=下一句）  数字1-9=选择  Esc=退出
 
 use std::fs;
 use std::path::Path;
@@ -109,7 +109,10 @@ impl App {
         };
         match *mgr.state() {
             SceneState::Playing => {
-                mgr.update(Some(rnd)).ok();
+                // 委托给 DialogueController：
+                // - 打字机进行中 → 跳过动画（typewriter.skip()）
+                // - 打字机完成 → 推进 VM 到下一句
+                mgr.on_click(Some(rnd)).ok();
                 print_state(mgr);
             }
             SceneState::Paused => {
@@ -140,6 +143,14 @@ impl App {
                 rnd.resize(size.width, size.height);
                 self.resize_pending = false;
             }
+        }
+
+        // 每帧推进打字机动画（DialogueController → Renderer 可见范围同步）
+        if let (Some(mgr), Some(rnd)) = (&mut self.manager, &mut self.renderer) {
+            mgr.update_dialogue(
+                std::time::Duration::from_millis(16), // ~60fps
+                &mut Some(rnd),
+            );
         }
 
         let (Some(gpu), Some(rnd)) = (&mut self.gpu, &mut self.renderer) else {

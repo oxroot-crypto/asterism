@@ -6,11 +6,24 @@
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-15
 
+use aster_renderer::TypewriterSpeed;
 use aster_vm::{EngineCommand, MenuChoiceData, Vm, VmAction};
 
 use crate::command_bridge::{self, Renderer};
+use crate::dialogue_controller::{DialogueAction, DialogueController, DialogueLine};
 use crate::error::RuntimeError;
 use crate::game_context::GameContext;
+
+/// 将配置中的文字速度转换为打字机运行时速度。
+fn to_typewriter_speed(speed: &aster_core::TextSpeed) -> TypewriterSpeed {
+    match speed {
+        aster_core::TextSpeed::Instant => TypewriterSpeed::Instant,
+        aster_core::TextSpeed::Slow => TypewriterSpeed::Slow,
+        aster_core::TextSpeed::Normal => TypewriterSpeed::Normal,
+        aster_core::TextSpeed::Fast => TypewriterSpeed::Fast,
+        aster_core::TextSpeed::Custom(ms) => TypewriterSpeed::Custom(*ms),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneState {
@@ -55,10 +68,13 @@ pub struct SceneManager {
     current_menu: Option<MenuState>,
     command_log: Vec<EngineCommand>,
     steps_this_update: usize,
+    dialogue_controller: DialogueController,
 }
 
 impl SceneManager {
     pub fn new(ctx: GameContext) -> Self {
+        // 从项目配置中读取默认文字显示速度
+        let text_speed = to_typewriter_speed(&ctx.default_text_speed);
         Self {
             ctx,
             vm: Vm::new(),
@@ -67,6 +83,7 @@ impl SceneManager {
             current_menu: None,
             command_log: Vec::new(),
             steps_this_update: 0,
+            dialogue_controller: DialogueController::new(text_speed),
         }
     }
 
@@ -112,6 +129,7 @@ impl SceneManager {
         self.state = SceneState::Playing;
         self.command_log.clear();
         self.steps_this_update = 0;
+        self.dialogue_controller.reset();
         Ok(())
     }
 
@@ -154,22 +172,27 @@ impl SceneManager {
         Ok(())
     }
 
-    /// 鼠标点击：打字机进行中→skip；打字机完成→推进对话。
+    /// 鼠标点击：委托给 DialogueController。
+    /// - 打字机进行中 → 跳过动画
+    /// - 打字机完成 → 推进 VM 到下一句
     pub fn on_click(
         &mut self,
         mut renderer: Option<&mut dyn Renderer>,
     ) -> Result<(), RuntimeError> {
         match self.state {
             SceneState::Playing => {
-                // 检查打字机状态：进行中则跳过动画，完成则推进对话
-                let complete = renderer.as_ref().is_none_or(|r| r.is_typewriter_complete());
-                if complete {
-                    self.update(renderer)
-                } else {
-                    if let Some(ref mut r) = renderer {
-                        r.skip_typewriter();
+                match self.dialogue_controller.on_click() {
+                    DialogueAction::Advance => {
+                        // 对话已完成且队列为空，推进 VM 以产生下一句
+                        self.update(renderer)
                     }
-                    Ok(())
+                    DialogueAction::None => {
+                        // 打字机被跳过（Typewriting→WaitingForAdvance）
+                        // 或队列中有下一句已自动开始显示
+                        // 同步可见范围到渲染器
+                        self.sync_dialogue_to_renderer(&mut renderer);
+                        Ok(())
+                    }
                 }
             }
             SceneState::Paused => {
@@ -228,7 +251,40 @@ impl SceneManager {
         self.update(renderer)
     }
 
+    /// 每帧更新打字机动画并同步可见范围到渲染器。
+    ///
+    /// 在事件循环中每帧调用一次。推进 DialogueController 内部的 Typewriter，
+    /// 然后将当前可见字符数同步到渲染器（`set_visible_range`）。
+    ///
+    /// # 参数
+    /// - `delta`: 自上一帧以来的时间增量
+    /// - `renderer`: 渲染器实现（用于 `set_visible_range` 调用）
+    pub fn update_dialogue(
+        &mut self,
+        delta: std::time::Duration,
+        renderer: &mut Option<&mut dyn Renderer>,
+    ) {
+        if self.state != SceneState::Playing {
+            return;
+        }
+        self.dialogue_controller.update(delta);
+        self.sync_dialogue_to_renderer(renderer);
+    }
+
+    /// 获取对 DialogueController 的不可变引用。
+    #[inline]
+    pub fn dialogue_controller(&self) -> &DialogueController {
+        &self.dialogue_controller
+    }
+
     // ─── 内部方法 ──────────────────────────────────────────────────
+
+    /// 将 DialogueController 的当前可见字符数同步到渲染器。
+    fn sync_dialogue_to_renderer(&self, renderer: &mut Option<&mut dyn Renderer>) {
+        if let Some(r) = renderer.as_mut() {
+            r.set_visible_range(0, self.dialogue_controller.current_visible_chars());
+        }
+    }
 
     fn process_action(
         &mut self,
@@ -279,6 +335,27 @@ impl SceneManager {
                 );
                 if matches!(&cmd, EngineCommand::Error { .. }) {
                     log::error!("[SceneManager] VM 错误：{}", cmd);
+                }
+
+                // 将对话命令推入 DialogueController（在 cmd 被 move 之前提取文本）
+                // command_bridge::dispatch 已调用 renderer.set_dialogue() 设置完整文本，
+                // DialogueController 负责管理打字机动画和点击推进逻辑
+                match &cmd {
+                    EngineCommand::SetDialogue { speaker, text, .. } => {
+                        self.dialogue_controller.push(DialogueLine {
+                            speaker: speaker.clone(),
+                            text: text.clone(),
+                            voice_id: None,
+                        });
+                    }
+                    EngineCommand::SetNarration { text } => {
+                        self.dialogue_controller.push(DialogueLine {
+                            speaker: String::new(),
+                            text: text.clone(),
+                            voice_id: None,
+                        });
+                    }
+                    _ => {}
                 }
 
                 let goto_target = command_bridge::dispatch(&cmd, &self.ctx, renderer);
@@ -435,6 +512,8 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, EngineCommand::SetDialogue { .. }))
         );
+        // 推进打字机到完成（DialogueController 管理 Typewriter）
+        m.update_dialogue(std::time::Duration::from_secs(1), &mut Some(&mut mock));
         m.on_click(Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Ended);
     }
@@ -598,8 +677,12 @@ mod tests {
         m.load_scene("t").unwrap();
         m.update(Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Playing);
+        // 第一句：推进打字机完成 → 点击推进到第二句
+        m.update_dialogue(std::time::Duration::from_secs(1), &mut Some(&mut mock));
         m.on_click(Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Playing);
+        // 第二句：推进打字机完成 → 点击推进到场景结束
+        m.update_dialogue(std::time::Duration::from_secs(1), &mut Some(&mut mock));
         m.on_click(Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Ended);
         assert_eq!(
@@ -626,6 +709,8 @@ mod tests {
         let mut m = SceneManager::new(make_ctx("t", s));
         m.load_scene("t").unwrap();
         m.update(Some(&mut mock)).unwrap();
+        // 推进打字机到完成，然后 Enter 键推进
+        m.update_dialogue(std::time::Duration::from_secs(1), &mut Some(&mut mock));
         m.on_key_press("Enter", Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Ended);
     }
@@ -644,6 +729,8 @@ mod tests {
         let mut m = SceneManager::new(make_ctx("t", s));
         m.load_scene("t").unwrap();
         m.update(Some(&mut mock)).unwrap();
+        // A 键不推进，但需要有推进过打字机（否则会进入 skip 逻辑）
+        m.update_dialogue(std::time::Duration::from_secs(1), &mut Some(&mut mock));
         m.on_key_press("A", Some(&mut mock)).unwrap();
         assert_eq!(*m.state(), SceneState::Playing);
     }
