@@ -71,4 +71,42 @@ pub enum RuntimeError {
         /// 具体错误描述
         message: String,
     },
+
+    /// 场景未找到 — 指定的场景 ID 在 GameContext 中不存在
+    ///
+    /// 可能原因：场景未编译、场景 ID 拼写错误、或对应 `.aster` 文件不存在
+    #[error("场景 '{scene_id}' 不存在或未编译，请确认场景 ID 正确且已在 build.toml 中注册")]
+    SceneNotFound {
+        /// 请求的场景标识符
+        scene_id: String,
+    },
+
+    /// 当前无已加载场景 — 在 load_scene 前调用了 update/on_click 等需要场景上下文的方法
+    #[error("当前没有已加载的场景，请先调用 load_scene() 加载场景")]
+    SceneNotLoaded,
+
+    /// 状态错误 — 在当前状态下不允许执行该操作
+    #[error("操作状态错误：期望 {expected} 状态，当前为 {actual} 状态")]
+    InvalidState {
+        /// 期望的状态描述
+        expected: String,
+        /// 实际的状态描述
+        actual: String,
+    },
+
+    /// 菜单选择索引越界 — select_choice 传入的索引超出可用选项范围
+    #[error("菜单选择索引 {index} 超出范围（可用选项数：{max}）")]
+    InvalidChoiceIndex {
+        /// 请求的选择索引
+        index: usize,
+        /// 可用选项总数
+        max: usize,
+    },
+
+    /// VM 执行错误 — 字节码损坏、无限循环、或运行时异常
+    #[error("VM 执行错误：{message}")]
+    VmError {
+        /// 错误描述
+        message: String,
+    },
 }

@@ -30,12 +30,12 @@
 | PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [x] |
 | PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [x] |
 | PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [x] |
-| PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [ ] |
+| PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [x] |
 | PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [ ] |
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 17 | 进行中: 0 | 待开始: 4
+**统计**：总计 21 个任务 | 已完成: 18 | 进行中: 0 | 待开始: 3
 
 ---
 
@@ -1719,7 +1719,7 @@ graph TD
 | **对应需求** | REQ-ENG-020（鼠标点击推进）, REQ-ENG-021（键盘推进）, REQ-ENG-022（选择支交互）, REQ-ENG-023（场景跳转） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — SceneManager 状态机） |
 | **前置依赖** | PH1-T07（背景渲染）, PH1-T08（立绘渲染）, PH1-T13（VM 核心）, PH1-T14（VM 变量/跳转）, PH1-T17（GameContext — 场景和角色数据来源） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1813,6 +1813,20 @@ graph TD
 | MV01 | 完整场景播放 | 运行引擎测试程序，加载 `prologue.aster`（含 bg + 1角色 + 5句对话 + 1选择支），通过鼠标点击推进剧情 | 场景从开始到结束完整播放：背景显示→立绘显示→对话逐句推进→菜单出现→选择后跳转→场景结束 |
 | MV02 | 选择支交互 | 在菜单出现时，点击不同的选项 | 每个选项执行不同的后续内容（跳转到不同标签），选择正确生效 |
 | MV03 | 键盘推进 | 在对话等待时按 Enter 键或 Space 键 | 键盘推进与鼠标点击效果一致，长按不重复触发 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-15
+- 实际工时：12 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（52/52 测试通过，零 Clippy warning）
+- 人工测试结果：✅ MV01-MV03 全部通过（从真实 prologue.aster 项目加载 + GPU 窗口渲染 + 打字机效果）
+- 备注：集成了 PH1-T10 Typewriter；bg/sprite 层已就绪但资产为占位纯色图
+
+**上下文交接**：
+- 关键决策：SceneManager 无生命周期（renderer 作参数传入）；GameRenderer 拥有 Device/Queue（clone）；CommandBridge 改为自由函数 dispatch
+- 新增接口：`SceneManager::new/load_scene/update/on_click/on_key_press/select_choice`、`Renderer` trait（16 方法）、`GameRenderer`、`MockRenderer`
+- 已知限制：bg/sprite 纹理从磁盘加载（`Texture::from_file`），路径通过 `project_root` 拼接；resize 仅更新尺寸不复建层；move_character 当前仅移除不重显
+- 建议下一个任务先读取：`scene_manager.rs`、`command_bridge.rs`、`renderer_impl.rs`
 
 ---
 ### PH1-T19 — 实现 DialogueController — 对话流管理 + 打字机状态控制
