@@ -32,10 +32,10 @@
 | PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [x] |
 | PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [x] |
 | PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [x] |
-| PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
+| PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [x] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 19 | 进行中: 0 | 待开始: 2
+**统计**：总计 21 个任务 | 已完成: 20 | 进行中: 0 | 待开始: 1
 
 ---
 
@@ -1936,7 +1936,7 @@ graph TD
 | **对应需求** | REQ-ENG-020（鼠标点击推进）, REQ-ENG-021（键盘推进） |
 | **对应架构模块** | `aster-runtime`（参考 Architecture.md §4.11 — InputManager） |
 | **前置依赖** | PH1-T06（winit 窗口 — 事件源） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -2017,6 +2017,19 @@ graph TD
 | MV02 | 键盘推进 | 在游戏窗口中按 Enter 键 | 与鼠标点击效果一致，对话推进一句 |
 | MV03 | 长按不重复 | 长按 Enter 键 2 秒 | 只推进一句对话，不连续跳过多句 |
 
+**完成记录**：
+- 完成时间：2026-06-15 17:30
+- 实际工时：2 小时
+- AI自验证结果：✅ AC01-AC05 全部通过（86/86 测试通过，含 15 个 InputManager 测试，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV03 全部通过（修复长按重复问题后）
+- 备注：增加了 OS 按键重复事件（`key_event.repeat`）过滤，防止长按触发多次推进。已将 InputManager 集成到 `examples/window_demo.rs`
+
+**上下文交接**：
+- 关键决策：去抖按输入源（Key/MouseButton）独立计时（HashMap），而非全局单一时间戳。满足"同一按键去抖，不同按键独立"的需求
+- 新增接口：`InputManager::process_event(&mut self, event: &WindowEvent) -> GameAction` — 核心入口，将 winit 事件映射为游戏动作
+- 新增类型：`GameAction` 枚举（Advance/OpenMenu/Skip/Auto/QuickSave/QuickLoad/ToggleFullscreen/Quit/None）
+- 已知限制：Phase 1 只映射了 Advance/OpenMenu/Quit/None，其余变体（Skip/Auto/QuickSave/QuickLoad/ToggleFullscreen）已预留待后续 Phase 实现
+- 建议下一个任务先读取：`engine/aster-runtime/src/input_manager.rs`（InputManager 完整实现 + 测试）、`engine/aster-runtime/examples/window_demo.rs`（集成参考）
 ---
 ### PH1-T21 — 主事件循环 — 帧循环 update→render→present + App 项目入口
 

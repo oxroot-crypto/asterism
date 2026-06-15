@@ -12,6 +12,7 @@ aster-vm = { workspace = true }
 aster-parser = { workspace = true }
 aster-renderer = { workspace = true }
 wgpu = { workspace = true }
+winit = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 toml = "0.8"
 thiserror = { workspace = true }
@@ -19,5 +20,4 @@ log = "0.4"
 
 [dev-dependencies]
 aster-parser = { workspace = true }
-winit = { workspace = true }
 image = { workspace = true }

@@ -30,7 +30,7 @@
 //! ## 待后续任务实现
 //!
 //! - **PH1-T19**：`DialogueController` — 对话流管理 + 打字机状态控制
-//! - **PH1-T20**：`InputManager` — winit 事件→游戏动作映射
+//! - ~~**PH1-T20**：`InputManager` — winit 事件→游戏动作映射~~ ✅ 已完成
 //! - **Phase 3**：`AsterRuntime` — 引擎运行时主结构 + `run()` 入口
 
 // 模块声明
@@ -40,6 +40,7 @@ pub mod error;
 pub mod game_context;
 pub mod game_loader;
 pub mod game_manifest;
+pub mod input_manager;
 pub mod renderer_impl;
 pub mod scene_manager;
 
@@ -50,5 +51,6 @@ pub use error::RuntimeError;
 pub use game_context::GameContext;
 pub use game_loader::GameLoader;
 pub use game_manifest::{GameManifest, SceneEntry};
+pub use input_manager::{GameAction, InputManager};
 pub use renderer_impl::GameRenderer;
 pub use scene_manager::{SceneManager, SceneState};

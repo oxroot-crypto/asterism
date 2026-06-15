@@ -11,14 +11,14 @@ use aster_compiler::{GameCompileInput, GameCompiler};
 use aster_core::Scene;
 use aster_renderer::{GpuContext, RenderConfig};
 use aster_runtime::{
-    GameContext, GameLoader, GameRenderer,
+    GameAction, GameContext, GameLoader, GameRenderer, InputManager,
     scene_manager::{SceneManager, SceneState},
 };
 use winit::{
     application::ApplicationHandler,
-    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
+    event::{ElementState, KeyEvent, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    keyboard::Key,
     window::{Window, WindowAttributes},
 };
 
@@ -26,6 +26,7 @@ struct App {
     gpu: Option<GpuContext>,
     renderer: Option<GameRenderer>,
     manager: Option<SceneManager>,
+    input: InputManager,
     window: Option<Arc<Window>>,
     resize_pending: bool,
 }
@@ -36,6 +37,7 @@ impl App {
             gpu: None,
             renderer: None,
             manager: None,
+            input: InputManager::new(),
             window: None,
             resize_pending: false,
         }
@@ -201,42 +203,43 @@ impl ApplicationHandler for App {
         _: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        match event {
-            WindowEvent::CloseRequested => el.exit(),
+        // 保留原始事件以处理数字键选择菜单（InputManager 不处理数字键）
+        if let WindowEvent::KeyboardInput {
+            event:
+                KeyEvent {
+                    state: ElementState::Pressed,
+                    logical_key: Key::Character(ch),
+                    ..
+                },
+            ..
+        } = &event
+            && let Ok(n) = ch.parse::<usize>()
+            && (1..=9).contains(&n)
+        {
+            self.choose(n - 1);
+            return;
+        }
+
+        // 特殊事件：Resize 和 Redraw 不由 InputManager 处理
+        match &event {
             WindowEvent::Resized(_) => {
                 self.resize_pending = true;
+                return;
             }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } => self.advance(),
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        state: ElementState::Pressed,
-                        logical_key: key,
-                        ..
-                    },
-                ..
-            } => match key {
-                Key::Named(NamedKey::Escape) => el.exit(),
-                Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => self.advance(),
-                Key::Character(ref ch) => {
-                    if let Ok(n) = ch.parse::<usize>()
-                        && (1..=9).contains(&n)
-                    {
-                        self.choose(n - 1);
-                    }
-                }
-                _ => {}
-            },
             WindowEvent::RedrawRequested => {
                 self.render_frame();
                 if let Some(w) = &self.window {
                     w.request_redraw();
                 }
+                return;
             }
+            _ => {}
+        }
+
+        // 通过 InputManager 统一处理输入事件
+        match self.input.process_event(&event) {
+            GameAction::Advance => self.advance(),
+            GameAction::Quit | GameAction::OpenMenu => el.exit(),
             _ => {}
         }
     }
