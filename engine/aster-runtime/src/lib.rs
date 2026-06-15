@@ -6,26 +6,34 @@
 //!           对外暴露 `AsterRuntime` 作为引擎的唯一入口点。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-12
-//! 最后修改：2026-06-12
+//! 最后修改：2026-06-15
 //!
 //! 依赖模块：
-//! - 集成所有 engine crate（待 Phase 3 添加）
-//! - aster-platform/aster-core/aster-renderer/aster-audio/aster-vm/aster-ui/aster-save
-//! - anyhow（待 Phase 3 添加）：错误传播
+//! - aster-core（核心数据类型：Game / Character / BuildConfig / Scene 等）
+//! - aster-platform / aster-renderer / aster-audio / aster-vm / aster-ui / aster-save（待 Phase 3 集成）
 //!
 //! 架构位置：依赖所有下层 crate（Architecture.md §4 分层图的顶层）
+//!
+//! ## 模块概览
+//!
+//! | 模块 | 文件 | 说明 |
+//! |------|------|------|
+//! | `error` | `error.rs` | 运行时错误类型：`RuntimeError`（IO/TOML/项目验证/角色解析错误） |
+//! | `game_loader` | `game_loader.rs` | 游戏清单加载器：`GameLoader::load()` → `GameManifest` |
+//! | `game_manifest` | `game_manifest.rs` | 游戏清单类型：`GameManifest` / `SceneEntry` |
+//!
+//! ## 待后续任务实现
+//!
+//! - **PH1-T17**：`GameContext` — 持有 CompiledGame + 角色表 + 跨场景导航
+//! - **PH1-T18**：`SceneManager` — 场景状态机 + VM Action→Renderer 桥接
+//! - **Phase 3**：`AsterRuntime` — 引擎运行时主结构 + `run()` 入口
 
-/// 运行时集成 — 待 Phase 3 实现
-///
-/// 将定义：
-/// - `AsterRuntime`：引擎运行时主结构
-/// - `Config`：运行时配置（分辨率/帧率/音量/语言）
-/// - `run(config: &Config) -> anyhow::Result<()>`：启动游戏主循环
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        // Phase 0 占位测试，Phase 3 实际开发时替换为运行时集成测试
-        assert_eq!(2 + 2, 4);
-    }
-}
+// 模块声明
+pub mod error;
+pub mod game_loader;
+pub mod game_manifest;
+
+// 重导出所有公开类型，方便外部 crate 通过 `aster_runtime::TypeName` 直接引用
+pub use error::RuntimeError;
+pub use game_loader::GameLoader;
+pub use game_manifest::{GameManifest, SceneEntry};

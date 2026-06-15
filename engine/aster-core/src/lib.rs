@@ -20,6 +20,7 @@
 //! | 模块 | 文件 | 说明 |
 //! |------|------|------|
 //! | `asset` | `asset.rs` | 资源类型：`AssetId`（newtype）、`AssetType`（8 种资源类别）、`Asset`（资源元数据） |
+//! | `build_config` | `build_config.rs` | 构建配置：`BuildConfig`、`CompileConfig`、`GlobPatterns`、`ArchiveConfig` |
 //! | `character` | `character.rs` | 角色定义：`Character`（id/name/display_color/description/birthday/default_position/sprites/voice）、`VoiceConfig` |
 //! | `expr` | `expr.rs` | 表达式类型：`Expr`（7 种 AST 节点）、`BinaryOp`（12 种二元运算符）、`UnaryOp`（2 种一元运算符），parser 和 compiler 共享 |
 //! | `game` | `game.rs` | 游戏元数据：`Game`、`Resolution`、`GameSettings`、`TextSpeed` |
@@ -32,6 +33,7 @@
 
 // 模块声明
 pub mod asset;
+pub mod build_config;
 pub mod character;
 pub mod expr;
 pub mod game;
@@ -40,6 +42,7 @@ pub mod variable;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_core::TypeName` 直接引用
 pub use asset::{Asset, AssetId, AssetType};
+pub use build_config::{ArchiveConfig, BuildConfig, CompileConfig, GlobPatterns};
 pub use character::{Character, VoiceConfig};
 pub use expr::{BinaryOp, Expr, UnaryOp};
 pub use game::{Game, GameSettings, Resolution, TextSpeed};

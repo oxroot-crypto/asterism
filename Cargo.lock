@@ -300,6 +300,12 @@ dependencies = [
 [[package]]
 name = "aster-runtime"
 version = "0.1.0"
+dependencies = [
+ "aster-core",
+ "serde",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+]
 
 [[package]]
 name = "aster-save"
