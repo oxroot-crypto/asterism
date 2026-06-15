@@ -109,4 +109,27 @@ pub enum RuntimeError {
         /// 错误描述
         message: String,
     },
+
+    /// 场景解析错误 — `.aster` 源码解析失败
+    #[error("场景 '{scene_id}' 解析失败：\n{}", messages.join("\n"))]
+    SceneParseError {
+        /// 出错的场景 ID
+        scene_id: String,
+        /// 错误消息列表（每个 ParseError 一行）
+        messages: Vec<String>,
+    },
+
+    /// 场景编译错误 — AST→字节码编译失败
+    #[error("编译失败：\n{}", messages.join("\n"))]
+    CompileError {
+        /// 错误消息列表（每个 CompileError 一行）
+        messages: Vec<String>,
+    },
+
+    /// 事件循环创建失败 — winit EventLoop 创建失败
+    #[error("事件循环创建失败：{message}")]
+    EventLoopError {
+        /// 错误描述
+        message: String,
+    },
 }

@@ -27,16 +27,21 @@
 //! | `command_bridge` | `command_bridge.rs` | 命令桥接器：`CommandBridge` — EngineCommand→Renderer trait 映射 |
 //! | `scene_manager` | `scene_manager.rs` | 场景管理器：`SceneManager` — 场景状态机 + VM Action 分发 |
 //!
-//! ## 待后续任务实现
+//! | `app` | `app.rs` | 引擎顶层入口：`App` — 持有所有子系统，提供 `open()` + 帧循环 |
+//! | `event_loop` | `event_loop.rs` | 事件循环处理器：`EventLoop` — winit ApplicationHandler 实现 |
 //!
-//! - **PH1-T19**：`DialogueController` — 对话流管理 + 打字机状态控制
+//! ## 已完成的后续任务
+//!
+//! - ~~**PH1-T19**：`DialogueController` — 对话流管理 + 打字机状态控制~~ ✅ 已完成
 //! - ~~**PH1-T20**：`InputManager` — winit 事件→游戏动作映射~~ ✅ 已完成
-//! - **Phase 3**：`AsterRuntime` — 引擎运行时主结构 + `run()` 入口
+//! - ~~**PH1-T21**：主事件循环 + App 项目入口~~ ✅ 已完成
 
 // 模块声明
+pub mod app;
 pub mod command_bridge;
 pub mod dialogue_controller;
 pub mod error;
+pub mod event_loop;
 pub mod game_context;
 pub mod game_loader;
 pub mod game_manifest;
@@ -45,9 +50,11 @@ pub mod renderer_impl;
 pub mod scene_manager;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_runtime::TypeName` 直接引用
+pub use app::App;
 pub use command_bridge::{MockRenderer, Renderer, dispatch};
 pub use dialogue_controller::{DialogueAction, DialogueController, DialogueLine, DialogueState};
 pub use error::RuntimeError;
+pub use event_loop::EventLoop as AppEventLoop;
 pub use game_context::GameContext;
 pub use game_loader::GameLoader;
 pub use game_manifest::{GameManifest, SceneEntry};
