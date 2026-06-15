@@ -13,7 +13,7 @@
 
 | 编号 | 任务名称 | 优先级 | 预估工时 | 依赖 | 状态 |
 |------|----------|--------|----------|------|------|
-| PH2-T01 | aster-audio — BGM 播放系统（crate 初始化 + kira 集成 + 循环/音量） | P0 | 6h | 无 | [ ] |
+| PH2-T01 | aster-audio — BGM 播放系统（crate 初始化 + kira 集成 + 循环/音量） | P0 | 6h | 无 | [x] |
 | PH2-T02 | aster-audio — SE 播放 + 多通道混音（BGM/SE 独立通道） | P0 | 4h | PH2-T01 | [ ] |
 | PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [ ] |
 | PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [ ] |
@@ -23,7 +23,7 @@
 | PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 0 | 进行中: 0 | 待开始: 9
+**统计**：总计 9 个任务 | 已完成: 1 | 进行中: 0 | 待开始: 8
 
 ---
 
@@ -64,7 +64,7 @@ graph TD
 | **对应需求** | REQ-ENG-030 — BGM 播放：播放背景音乐（OGG/FLAC/MP3），支持循环播放、停止、音量设置 |
 | **对应架构模块** | `aster-audio`（参考 Architecture.md 4.7 节 — 音频系统） |
 | **前置依赖** | 无（`aster-audio` crate 存根已存在于 workspace，可直接开始） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -185,33 +185,38 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-15 16:30
+- 实际工时：3 小时
+- AI 自验证结果：✅ AC01-AC08 全部通过（10 单元测试 + 8 文档测试）
+- 人工测试结果：✅ 全部通过
+- 备注：实际使用 kira 0.12.1（非任务说明中的 0.9+），API 差异已适配（Decibels / Tween 路径 / AudioManager<DefaultBackend> 泛型）。stop_bgm() 返回类型从 Result 改为无返回值（内部自行处理），与任务说明略有差异。
 
 **上下文交接**：
 - 关键决策：
-  - 选用 kira 0.9+ 作为音频后端（而非 rodio/cpal 直接操作），因为其原生支持 loop region、tweening、多通道混音
+  - 选用 kira 0.12.1 作为音频后端（非 rodio/cpal 直接操作），因为其原生支持 loop region、tweening、多通道混音
   - AudioSystem 定义为具体结构体而非 trait，与 Renderer 的设计模式不同——AudioSystem 暂无多后端需求
-  - `current_bgm_id` 字段记录当前播放的 BGM 资源 ID，为后续音频状态快照（PH2-T03）做准备
+  - `current_bgm_path: Option<String>` 记录当前播放的 BGM 文件路径（非 AssetId），因为在 AssetManager 就绪前使用直接路径。PH2-T08 集成后可改为 `Option<AssetId>`
+  - 音量使用振幅比（0.0~1.0）作为对外接口，内部通过 `amplitude_to_db()` 转换为 kira 的 `Decibels` 分贝值
+  - `stop_bgm()` 返回 `()` 而非 `Result`——停止操作在 kira 内部总是成功（异步命令发送），即使无 BGM 播放也是 no-op
+  - kira AudioManager 使用 `DefaultBackend`（cpal），自动选择平台原生音频驱动
 - 新增接口：
   ```rust
-  pub struct AudioSystem { /* ... */ }
+  pub struct AudioSystem { /* manager, bgm_handle, current_bgm_path, bgm_volume */ }
   impl AudioSystem {
       pub fn new() -> Result<Self, AudioError>;
       pub fn play_bgm(&mut self, asset_path: &str, looping: bool) -> Result<(), AudioError>;
-      pub fn stop_bgm(&mut self) -> Result<(), AudioError>;
+      pub fn stop_bgm(&mut self);
       pub fn set_bgm_volume(&mut self, volume: f32);
       pub fn bgm_volume(&self) -> f32;
       pub fn is_bgm_playing(&self) -> bool;
   }
+  pub enum AudioError { AssetNotFound, DecodeError, PlaybackError, Io }
   ```
 - 已知限制：
-  - 当前仅支持 OGG/FLAC/MP3 格式（symphonia 解码），不支持 MIDI/Tracker 模块
   - `EngineCommand::PlayBgm` 的 `fade_in` 参数被忽略（PH2-T03 实现）
-  - 音频文件路径通过 `AssetId` 对应的路径直接传入，尚未通过 AssetManager 管理加载（PH2-T04 统一资源加载后修改）
+  - `stop_bgm()` 无 fade_out 效果，立即停止（PH2-T03 将添加 `stop_bgm_with_fade()`）
+  - 音频文件路径直接传入，尚未通过 AssetManager 管理加载（PH2-T04/PH2-T08 修改）
+  - AudioSystem 无 SE/Voice 通道（PH2-T02/Phase 4）
 - 建议下一个任务先读取：`engine/aster-audio/src/audio_system.rs`、`engine/aster-audio/src/error.rs`
 ### PH2-T02 — aster-audio SE 播放 + 多通道混音（BGM/SE 独立通道）
 

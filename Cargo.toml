@@ -51,6 +51,8 @@ winit = "0.30.13"
 pollster = "0.4"
 image = "0.25"
 bytemuck = { version = "1", features = ["derive"] }
+kira = "0.12"
+symphonia = { version = "0.5", features = ["all"] }
 
 # ============================================================
 # 编译配置文件

@@ -42,27 +42,34 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
 
-      # 3. Rust 编译缓存
+      # 3. 安装系统依赖（仅 Linux 需要 ALSA 开发库，audio crate 编译依赖）
+      - name: 安装系统依赖（Linux）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      # 4. Rust 编译缓存
       - name: Rust 编译缓存
         uses: Swatinem/rust-cache@v2
 
-      # 4. 格式检查（零 tolerance）
+      # 5. 格式检查（零 tolerance）
       - name: cargo fmt --check
         run: cargo fmt --check
 
-      # 5. Clippy 门禁（零 warning）
+      # 6. Clippy 门禁（零 warning）
       - name: cargo clippy
         run: cargo clippy --workspace --exclude aster-ide --all-targets -- -D warnings
 
-      # 6. 测试（Engine + Packager）
+      # 7. 测试（Engine + Packager）
       - name: cargo test
         run: cargo test --workspace --exclude aster-ide
 
-      # 7. Release 构建
+      # 8. Release 构建
       - name: cargo build --release
         run: cargo build --workspace --exclude aster-ide --release
 
-      # 8. 上传引擎二进制产物
+      # 9. 上传引擎二进制产物
       - name: 上传引擎产物 (${{ matrix.os }})
         uses: actions/upload-artifact@v4
         if: success()
