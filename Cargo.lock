@@ -301,7 +301,9 @@ dependencies = [
 name = "aster-runtime"
 version = "0.1.0"
 dependencies = [
+ "aster-compiler",
  "aster-core",
+ "aster-parser",
  "serde",
  "thiserror 2.0.18",
  "toml 0.8.23",

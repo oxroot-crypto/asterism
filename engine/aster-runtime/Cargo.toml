@@ -7,6 +7,10 @@ description = "运行时集成 — 集成所有子系统，提供统一的游戏
 
 [dependencies]
 aster-core = { workspace = true }
+aster-compiler = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 toml = "0.8"
 thiserror = { workspace = true }
+
+[dev-dependencies]
+aster-parser = { workspace = true }
