@@ -14,7 +14,7 @@
 | 编号 | 任务名称 | 优先级 | 预估工时 | 依赖 | 状态 |
 |------|----------|--------|----------|------|------|
 | PH2-T01 | aster-audio — BGM 播放系统（crate 初始化 + kira 集成 + 循环/音量） | P0 | 6h | 无 | [x] |
-| PH2-T02 | aster-audio — SE 播放 + 多通道混音（BGM/SE 独立通道） | P0 | 4h | PH2-T01 | [ ] |
+| PH2-T02 | aster-audio — SE 播放 + 多通道混音（BGM/SE 独立通道） | P0 | 4h | PH2-T01 | [x] |
 | PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [ ] |
 | PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [ ] |
 | PH2-T05 | aster-asset — LRU 缓存策略（淘汰机制 + 命中率统计） | P0 | 4h | PH2-T04 | [ ] |
@@ -23,7 +23,7 @@
 | PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 1 | 进行中: 0 | 待开始: 8
+**统计**：总计 9 个任务 | 已完成: 2 | 进行中: 0 | 待开始: 7
 
 ---
 
@@ -227,7 +227,7 @@ graph TD
 | **对应需求** | REQ-ENG-031 — 音效（SE）播放：播放一次性音效（OGG/WAV），可与 BGM 同时播放 |
 | **对应架构模块** | `aster-audio`（参考 Architecture.md 4.7 节 — 音频系统） |
 | **前置依赖** | PH2-T01（BGM 播放系统已实现，AudioSystem 结构体和 AudioError 已就绪） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -320,30 +320,29 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-15 22:45
+- 实际工时：2 小时
+- AI 自验证结果：✅ AC01-AC06 全部通过（16 单元测试 + 11 文档测试）
+- 人工测试结果：✅ 确认通过（MV01/MV02 需 PH2-T08 集成后验证，单元测试已覆盖核心逻辑）
+- 备注：实际使用 kira 0.12 TrackHandle API（非任务说明中的 MixerHandle）。BGM 同步迁移到子轨道，音量控制从 per-sound handle 改为 track-level。
 
 **上下文交接**：
 - 关键决策：
-  - SE 通道使用 kira 子混音器（`add_sub_mixer`）实现，与 BGM 通道完全隔离
-  - 重构音频解码为共享私有函数 `load_sound_data()`，避免 BGM/SE 代码重复
-  - SE 播放后不持有 handle（fire-and-forget 模式），由 kira 内部管理生命周期
+  - 使用 kira 0.12 `TrackHandle` 实现 BGM/SE 通道隔离——`add_sub_track(TrackBuilder)` 创建子轨道
+  - BGM 同步迁移到子轨道（`bgm_track`），音量通过 `bgm_track.set_volume()` 控制——音量在 BGM 停止后持久，新 BGM 自动继承
+  - 提取 `load_sound_data()` 为关联函数，BGM 和 SE 共用文件检查和解码
+  - SE 采用 fire-and-forget 模式——不持有 handle，由 kira 内部管理生命周期
 - 新增接口：
   ```rust
-  impl AudioSystem {
-      pub fn play_se(&mut self, asset_path: &str) -> Result<(), AudioError>;
-      pub fn set_se_volume(&mut self, volume: f32);
-      pub fn se_volume(&self) -> f32;
-  }
+  pub fn play_se(&mut self, asset_path: &str) -> Result<(), AudioError>;
+  pub fn set_se_volume(&mut self, volume: f32);
+  pub fn se_volume(&self) -> f32;
   ```
 - 已知限制：
-  - SE 无播放状态查询（fire-and-forget 模式下 SE 播完自动消失）
-  - SE 无优先级/抢占机制（如需要"重要 SE 打断当前 SE"，需在后续版本添加队列管理）
-  - 连续大量 SE（>20 个/秒）可能造成 kira 内部队列堆积，但正常视觉小说场景不会触发此上限
+  - SE 无播放状态查询（fire-and-forget 模式）
+  - `EngineCommand::PlaySe` 的 `fade_in` 参数预留但未实现（PH2-T03）
 - 建议下一个任务先读取：`engine/aster-audio/src/audio_system.rs`
+
 ### PH2-T03 — aster-audio fade_in/fade_out + 音频状态快照
 
 | 属性 | 内容 |

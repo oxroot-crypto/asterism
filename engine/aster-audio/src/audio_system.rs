@@ -2,15 +2,14 @@
 //!
 //! 文件路径：engine/aster-audio/src/audio_system.rs
 //! 功能概述：音频系统核心 — `AudioSystem` 结构体封装 kira 音频管理器，
-//!           提供 BGM 背景音乐的加载、播放、循环、停止和音量控制。
-//!           本模块是音频系统的基石，后续 SE（PH2-T02）、fade（PH2-T03）
-//!           均在此基础上扩展。
+//!           提供 BGM 背景音乐和 SE 音效的加载、播放、停止、循环和音量控制。
+//!           本模块是音频系统的基石，后续 fade（PH2-T03）在此基础上扩展。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-15
 //! 最后修改：2026-06-15
 //!
 //! 依赖模块：
-//! - kira（音频引擎后端，通过 cpal 与系统音频设备交互）
+//! - kira（音频引擎后端：AudioManager / TrackBuilder / TrackHandle / StaticSoundData）
 //! - crate::error::AudioError（错误类型）
 
 use std::path::Path;
@@ -38,11 +37,19 @@ fn amplitude_to_db(ratio: f32) -> kira::Decibels {
     }
 }
 
-/// 音频系统 — 管理 BGM 背景音乐的播放、停止和音量控制。
+/// 音频系统 — 管理 BGM/SE 的播放、停止和音量控制。
 ///
-/// 封装 kira 音频引擎，对外暴露游戏引擎所需的 BGM 操作接口。
-/// AudioSystem 设计为具体结构体而非 trait——当前无多后端需求，
+/// 封装 kira 音频引擎，BGM 和 SE 通过独立子轨道（TrackHandle）隔离混音，
+/// 互不干扰。AudioSystem 设计为具体结构体而非 trait——当前无多后端需求，
 /// 且与 `aster-renderer` 的 `Renderer` trait 设计模式不同。
+///
+/// # 音频通道架构
+///
+/// ```text
+/// AudioManager (main track)
+///   ├── bgm_track → BGM 播放（支持循环、单曲独占）
+///   └── se_track  → SE 播放（fire-and-forget、支持并发）
+/// ```
 ///
 /// # 线程安全
 ///
@@ -55,9 +62,12 @@ fn amplitude_to_db(ratio: f32) -> kira::Decibels {
 /// | 字段 | 类型 | 说明 |
 /// |------|------|------|
 /// | `manager` | `kira::AudioManager<DefaultBackend>` | kira 音频管理器，持有音频设备和混音图 |
-/// | `bgm_handle` | `Option<StaticSoundHandle>` | 当前 BGM 播放句柄，用于停止和音量调整 |
+/// | `bgm_track` | `kira::track::TrackHandle` | BGM 子轨道，独立音量控制 |
+/// | `se_track` | `kira::track::TrackHandle` | SE 子轨道，独立音量控制 |
+/// | `bgm_handle` | `Option<StaticSoundHandle>` | 当前 BGM 播放句柄，用于停止 |
 /// | `current_bgm_path` | `Option<String>` | 当前播放的 BGM 文件路径（用于状态快照 PH2-T03） |
 /// | `bgm_volume` | `f32` | BGM 通道当前音量（0.0 ~ 1.0） |
+/// | `se_volume` | `f32` | SE 通道当前音量（0.0 ~ 1.0） |
 ///
 /// # 示例
 ///
@@ -67,7 +77,9 @@ fn amplitude_to_db(ratio: f32) -> kira::Decibels {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut audio = AudioSystem::new()?;
 /// audio.play_bgm("assets/bgm/theme.ogg", true)?;
+/// audio.play_se("assets/se/click.wav")?;
 /// audio.set_bgm_volume(0.8);
+/// audio.set_se_volume(0.6);
 /// assert!(audio.is_bgm_playing());
 /// audio.stop_bgm();
 /// # Ok(())
@@ -76,14 +88,23 @@ fn amplitude_to_db(ratio: f32) -> kira::Decibels {
 pub struct AudioSystem {
     /// kira 音频管理器 — 持有音频设备连接和混音图
     /// 使用 DefaultBackend（cpal），自动选择平台原生音频驱动
+    /// 注意：manager 不直接调用 play()，但持有 main track 所有权，
+    /// bgm_track/se_track 依赖其生命周期
+    #[allow(dead_code)]
     manager: kira::AudioManager<kira::DefaultBackend>,
+    /// BGM 子轨道 — 独立音量控制，BGM 独占播放
+    bgm_track: kira::track::TrackHandle,
+    /// SE 子轨道 — 独立音量控制，支持多个 SE 并发播放
+    se_track: kira::track::TrackHandle,
     /// 当前 BGM 播放句柄 — None 表示无 BGM 播放中
-    /// 持有此句柄可以停止播放和调整音量
+    /// 持有此句柄可以停止播放
     bgm_handle: Option<kira::sound::static_sound::StaticSoundHandle>,
     /// 当前 BGM 文件路径 — 为后续音频状态快照（PH2-T03）做准备
     current_bgm_path: Option<String>,
     /// BGM 通道音量（0.0 ~ 1.0），默认 0.8
     bgm_volume: f32,
+    /// SE 通道音量（0.0 ~ 1.0），默认 0.8
+    se_volume: f32,
 }
 
 impl AudioSystem {
@@ -110,18 +131,67 @@ impl AudioSystem {
         // AudioManagerSettings::default() 配置：
         // - 采样率：44100 Hz
         // - 后端：DefaultBackend（cpal，跨平台音频库，自动选择平台原生驱动）
-        let manager =
+        let mut manager =
             kira::AudioManager::<kira::DefaultBackend>::new(kira::AudioManagerSettings::default())
                 .map_err(|e| AudioError::PlaybackError {
                     reason: format!("无法创建音频管理器：{}", e),
                 })?;
 
+        // 创建 BGM 子轨道 — 单曲独占，容量 4 首
+        let bgm_track = manager
+            .add_sub_track(kira::track::TrackBuilder::new().sound_capacity(4))
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法创建 BGM 子轨道：{}", e),
+            })?;
+
+        // 创建 SE 子轨道 — 支持并发音效，容量 16 首
+        let se_track = manager
+            .add_sub_track(kira::track::TrackBuilder::new().sound_capacity(16))
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法创建 SE 子轨道：{}", e),
+            })?;
+
         Ok(Self {
             manager,
+            bgm_track,
+            se_track,
             bgm_handle: None,
             current_bgm_path: None,
             // 默认 BGM 音量 0.8，与 GameSettings::default_bgm_volume 一致
             bgm_volume: 0.8,
+            // 默认 SE 音量 0.8，与 GameSettings::default_se_volume 一致
+            se_volume: 0.8,
+        })
+    }
+
+    /// 加载音频文件为 kira 可播放的声音数据。
+    ///
+    /// BGM 和 SE 播放的共用入口，处理文件存在性检查和格式解码。
+    /// 使用 symphonia 自动检测格式（OGG/FLAC/MP3/WAV）。
+    ///
+    /// # 参数
+    /// - `asset_path`：音频文件路径
+    ///
+    /// # 错误
+    /// - `AudioError::AssetNotFound` — 文件不存在
+    /// - `AudioError::DecodeError` — 格式不支持或内容损坏
+    fn load_sound_data(
+        asset_path: &str,
+    ) -> Result<kira::sound::static_sound::StaticSoundData, AudioError> {
+        let path = Path::new(asset_path);
+
+        // 检查文件是否存在
+        if !path.exists() {
+            return Err(AudioError::AssetNotFound {
+                path: asset_path.to_string(),
+            });
+        }
+
+        // 使用 kira/symphonia 自动检测格式并解码
+        kira::sound::static_sound::StaticSoundData::from_file(path).map_err(|e| {
+            AudioError::DecodeError {
+                reason: format!("无法解码音频文件 \"{}\"：{}", asset_path, e),
+            }
         })
     }
 
@@ -162,26 +232,11 @@ impl AudioSystem {
     /// # }
     /// ```
     pub fn play_bgm(&mut self, asset_path: &str, looping: bool) -> Result<(), AudioError> {
-        let path = Path::new(asset_path);
-
-        // 检查文件是否存在（提前返回友好错误）
-        if !path.exists() {
-            return Err(AudioError::AssetNotFound {
-                path: asset_path.to_string(),
-            });
-        }
-
         // 如果已有 BGM 播放中，先停止（AC08：BGM 替换）
         self.stop_bgm();
 
-        // 使用 kira 加载音频文件
-        // StaticSoundData::from_file 内部使用 symphonia 自动检测格式并解码
-        let mut sound_data =
-            kira::sound::static_sound::StaticSoundData::from_file(path).map_err(|e| {
-                AudioError::DecodeError {
-                    reason: format!("无法解码音频文件 \"{}\"：{}", asset_path, e),
-                }
-            })?;
+        // 加载音频文件（BGM/SE 共用解码逻辑）
+        let mut sound_data = Self::load_sound_data(asset_path)?;
 
         // 设置循环播放
         if looping {
@@ -190,13 +245,9 @@ impl AudioSystem {
             sound_data = sound_data.loop_region(..);
         }
 
-        // 设置初始音量（将 0.0~1.0 的振幅比转换为分贝值）
-        let db = amplitude_to_db(self.bgm_volume);
-        sound_data = sound_data.volume(db);
-
-        // 提交播放到音频管理器，获取句柄
+        // 提交播放到 BGM 子轨道，获取句柄
         let handle = self
-            .manager
+            .bgm_track
             .play(sound_data)
             .map_err(|e| AudioError::PlaybackError {
                 reason: format!("无法播放音频 \"{}\"：{}", asset_path, e),
@@ -274,12 +325,9 @@ impl AudioSystem {
         let clamped = volume.clamp(0.0, 1.0);
         self.bgm_volume = clamped;
 
-        // 如果当前有 BGM 播放中，实时更新其音量
-        if let Some(ref mut handle) = self.bgm_handle {
-            // 将振幅比转换为分贝值，通过 kira handle 即时设置
-            let db = amplitude_to_db(clamped);
-            handle.set_volume(db, kira::Tween::default());
-        }
+        // 通过 BGM 子轨道设置音量，所有通过此轨道的声音均受影响
+        let db = amplitude_to_db(clamped);
+        self.bgm_track.set_volume(db, kira::Tween::default());
     }
 
     /// 获取当前 BGM 通道音量。
@@ -297,6 +345,99 @@ impl AudioSystem {
     /// ```
     pub fn bgm_volume(&self) -> f32 {
         self.bgm_volume
+    }
+
+    /// 播放一次性音效（SE）。
+    ///
+    /// 在 SE 子轨道上播放指定路径的音频文件。SE 采用 fire-and-forget
+    /// 模式——方法立即返回，不持有播放句柄，音频播完后自动释放资源。
+    /// SE 可与 BGM 同时播放，互不干扰。
+    ///
+    /// # 参数
+    ///
+    /// - `asset_path`：音频文件路径（如 `"assets/se/click.wav"`）
+    ///
+    /// # 错误
+    ///
+    /// - `AudioError::AssetNotFound` — 指定路径的文件不存在
+    /// - `AudioError::DecodeError` — 文件格式不支持或内容损坏
+    /// - `AudioError::PlaybackError` — kira 播放提交失败
+    ///
+    /// # 并发播放
+    ///
+    /// SE 子轨道容量为 16，支持最多 16 个 SE 同时播放。
+    /// 超出容量时 kira 内部排队，返回错误而非阻塞。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// audio.play_se("assets/se/click.wav")?;
+    /// audio.play_se("assets/se/confirm.wav")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn play_se(&mut self, asset_path: &str) -> Result<(), AudioError> {
+        // 加载音频文件（BGM/SE 共用解码逻辑）
+        let sound_data = Self::load_sound_data(asset_path)?;
+
+        // 提交播放到 SE 子轨道（fire-and-forget，不持有句柄）
+        self.se_track
+            .play(sound_data)
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法播放音效 \"{}\"：{}", asset_path, e),
+            })?;
+
+        Ok(())
+    }
+
+    /// 设置 SE 通道音量。
+    ///
+    /// 通过 SE 子轨道独立控制音量，不影响 BGM 音量。
+    /// 音量值自动钳制到 `0.0 ~ 1.0` 范围。
+    ///
+    /// # 参数
+    ///
+    /// - `volume`：目标音量（0.0 ~ 1.0），超出范围自动钳制
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// audio.set_se_volume(0.5);
+    /// assert!((audio.se_volume() - 0.5).abs() < f32::EPSILON);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_se_volume(&mut self, volume: f32) {
+        // 钳制到 [0.0, 1.0] 范围
+        let clamped = volume.clamp(0.0, 1.0);
+        self.se_volume = clamped;
+
+        // 通过 SE 子轨道设置音量，所有通过此轨道的声音均受影响
+        let db = amplitude_to_db(clamped);
+        self.se_track.set_volume(db, kira::Tween::default());
+    }
+
+    /// 获取当前 SE 通道音量。
+    ///
+    /// # 返回值
+    ///
+    /// 当前 SE 音量值（0.0 ~ 1.0）
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # let audio = AudioSystem::new().unwrap();
+    /// assert!((audio.se_volume() - 0.8).abs() < f32::EPSILON);
+    /// ```
+    pub fn se_volume(&self) -> f32 {
+        self.se_volume
     }
 
     /// 检查是否有 BGM 正在播放。
@@ -717,6 +858,208 @@ mod tests {
         let _ = std::fs::remove_file(&wav_a);
         let _ = std::fs::remove_file(&wav_b);
         let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    // ─── PH2-T02: SE 音效播放 ─────────────────────────────────────────────────
+
+    /// AC01 — SE 播放正常。
+    ///
+    /// 验证调用 `play_se` 后返回 Ok，不 panic。
+    #[test]
+    fn ac01_se_play_normal() {
+        let temp_dir = std::env::temp_dir().join("aster_test_se01");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("test_se01.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+        let result = audio.play_se(wav_path.to_str().unwrap());
+
+        assert!(result.is_ok(), "play_se 应返回 Ok，实际: {:?}", result);
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC02 — BGM 与 SE 同时播放互不干扰。
+    ///
+    /// 验证：先 play_bgm → 再 play_se → BGM 仍在播放。
+    #[test]
+    fn ac02_bgm_and_se_simultaneous() {
+        let temp_dir = std::env::temp_dir().join("aster_test_se02");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let bgm_path = temp_dir.join("bgm_se02.wav");
+        let se_path = temp_dir.join("se_se02.wav");
+        generate_test_wav(&bgm_path);
+        generate_test_wav(&se_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 播放 BGM
+        audio
+            .play_bgm(bgm_path.to_str().unwrap(), false)
+            .expect("play_bgm 应成功");
+        assert!(audio.is_bgm_playing(), "BGM 应正在播放");
+
+        // 同时播放 SE（BGM 不应中断）
+        let result = audio.play_se(se_path.to_str().unwrap());
+        assert!(result.is_ok(), "play_se 应返回 Ok，实际: {:?}", result);
+        assert!(audio.is_bgm_playing(), "SE 播放后 BGM 仍应正在播放");
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&bgm_path);
+        let _ = std::fs::remove_file(&se_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC03 — 快速连续 SE 播放。
+    ///
+    /// 验证快速连续调用 play_se 5 次均返回 Ok，不 panic。
+    #[test]
+    fn ac03_rapid_se_playback() {
+        let temp_dir = std::env::temp_dir().join("aster_test_se03");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("test_se03.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 快速连续播放 5 次 SE
+        for i in 0..5 {
+            let result = audio.play_se(wav_path.to_str().unwrap());
+            assert!(
+                result.is_ok(),
+                "第 {} 次 play_se 应返回 Ok，实际: {:?}",
+                i + 1,
+                result
+            );
+        }
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC04 — SE 独立音量控制。
+    ///
+    /// 验证 set_se_volume 不影响 BGM 音量。
+    #[test]
+    fn ac04_se_volume_independent() {
+        let temp_dir = std::env::temp_dir().join("aster_test_se04");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let bgm_path = temp_dir.join("bgm_se04.wav");
+        generate_test_wav(&bgm_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 默认值
+        assert!(
+            (audio.bgm_volume() - 0.8).abs() < f32::EPSILON,
+            "默认 BGM 音量应为 0.8"
+        );
+        assert!(
+            (audio.se_volume() - 0.8).abs() < f32::EPSILON,
+            "默认 SE 音量应为 0.8"
+        );
+
+        // 调整 SE 音量，BGM 不应变化
+        audio.set_se_volume(0.3);
+        assert!(
+            (audio.se_volume() - 0.3).abs() < f32::EPSILON,
+            "SE 音量应更新为 0.3"
+        );
+        assert!(
+            (audio.bgm_volume() - 0.8).abs() < f32::EPSILON,
+            "BGM 音量应保持 0.8 不变"
+        );
+
+        // 调整 BGM 音量，SE 不应变化
+        audio.set_bgm_volume(0.5);
+        assert!(
+            (audio.bgm_volume() - 0.5).abs() < f32::EPSILON,
+            "BGM 音量应更新为 0.5"
+        );
+        assert!(
+            (audio.se_volume() - 0.3).abs() < f32::EPSILON,
+            "SE 音量应保持 0.3 不变"
+        );
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&bgm_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC05 — SE 静音。
+    ///
+    /// 验证 set_se_volume(0.0) 后 play_se 仍成功提交。
+    #[test]
+    fn ac05_se_mute() {
+        let temp_dir = std::env::temp_dir().join("aster_test_se05");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("test_se05.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 静音后播放 SE 应仍返回 Ok（提交成功，只是音量极低）
+        audio.set_se_volume(0.0);
+        let result = audio.play_se(wav_path.to_str().unwrap());
+        assert!(
+            result.is_ok(),
+            "静音状态下 play_se 仍应返回 Ok，实际: {:?}",
+            result
+        );
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC06 — 解码逻辑复用：BGM 和 SE 的 AssetNotFound 错误格式一致。
+    ///
+    /// 验证 BGM 和 SE 都通过 `load_sound_data()` 统一处理文件不存在的情况。
+    #[test]
+    fn ac06_se_and_bgm_share_decode_logic() {
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // BGM 文件不存在
+        let bgm_result = audio.play_bgm("nonexistent/bgm.ogg", false);
+        match bgm_result {
+            Err(AudioError::AssetNotFound { path }) => {
+                assert!(path.contains("bgm.ogg"), "BGM 错误应包含路径");
+            }
+            other => panic!("BGM 应返回 AssetNotFound，实际: {:?}", other),
+        }
+
+        // SE 文件不存在（应通过同一 load_sound_data 路径）
+        let se_result = audio.play_se("nonexistent/se.wav");
+        match se_result {
+            Err(AudioError::AssetNotFound { path }) => {
+                assert!(path.contains("se.wav"), "SE 错误应包含路径");
+            }
+            other => panic!("SE 应返回 AssetNotFound，实际: {:?}", other),
+        }
     }
 
     // ─── 补充测试 ──────────────────────────────────────────────────────
