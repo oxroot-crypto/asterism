@@ -491,8 +491,8 @@ mod tests {
         // 验证场景数量
         assert_eq!(
             manifest.scenes.len(),
-            2,
-            "应有 2 个场景，实际: {:?}",
+            3,
+            "应有 3 个场景，实际: {:?}",
             manifest
                 .scenes
                 .iter()
@@ -500,7 +500,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        // 验证两个场景都在清单中
+        // 验证三个场景都在清单中
         let scene_ids: Vec<&str> = manifest
             .scenes
             .iter()
@@ -510,6 +510,10 @@ mod tests {
         assert!(
             scene_ids.contains(&"chapter1/sakura_road"),
             "应有 chapter1/sakura_road 场景"
+        );
+        assert!(
+            scene_ids.contains(&"chapter1/library"),
+            "应有 chapter1/library 场景"
         );
 
         // 验证 build_config 已加载

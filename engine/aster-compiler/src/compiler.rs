@@ -126,6 +126,26 @@ impl Compiler {
         self.compile_impl(scene, false)
     }
 
+    /// 使用 `CompileConfig` 编译场景（供 `GameCompiler` 调用）。
+    ///
+    /// `config.optimize` 控制是否启用 4 个优化 Pass。
+    /// `config.minify` 为 Phase 1 预留（当前不执行实际压缩）。
+    ///
+    /// # 参数
+    /// - `scene`：来自 `aster_parser::parse_script()` 的已解析场景
+    /// - `config`：编译配置（来自 `build.toml` 的 `[compile]` section）
+    ///
+    /// # 返回值
+    /// - `Ok(CompiledScene)`：编译成功
+    /// - `Err(Vec<CompileError>)`：编译失败，包含所有语义错误
+    pub fn compile_with_config(
+        self,
+        scene: &Scene,
+        config: &aster_core::CompileConfig,
+    ) -> Result<CompiledScene, Vec<CompileError>> {
+        self.compile_impl(scene, config.optimize)
+    }
+
     /// 编译实现 — `optimize` 控制是否启用优化 Pass。
     fn compile_impl(
         mut self,

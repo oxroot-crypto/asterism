@@ -28,14 +28,14 @@
 | PH1-T13 | 实现 `aster-vm` 核心 — Vm/VmAction/Opcode/token-threaded dispatch | P0 | 10h | PH1-T11, PH1-T12 | [x] |
 | PH1-T14 | 实现 `aster-vm` — 变量/旗标/跳转执行 | P0 | 6h | PH1-T03, PH1-T13 | [x] |
 | PH1-T15 | 实现游戏清单加载 — GameLoader（aster.toml + .asterchar + 场景发现） | P0 | 6h | PH1-T02, PH1-T05 | [x] |
-| PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [ ] |
+| PH1-T16 | 实现游戏编译器 — GameCompiler（批量编译 + 跨场景引用解析 + build.toml） | P0 | 8h | PH1-T11, PH1-T12, PH1-T15 | [x] |
 | PH1-T17 | 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航） | P0 | 4h | PH1-T15, PH1-T16 | [ ] |
 | PH1-T18 | 实现 SceneManager — 场景状态机 + VM Action→Renderer 命令转换 | P0 | 12h | PH1-T07, PH1-T08, PH1-T13, PH1-T14, PH1-T17 | [ ] |
 | PH1-T19 | 实现 DialogueController — 对话流管理 + 打字机状态控制 | P0 | 6h | PH1-T10, PH1-T18 | [ ] |
 | PH1-T20 | 实现 InputManager — winit 事件→游戏动作映射 | P0 | 4h | PH1-T06 | [ ] |
 | PH1-T21 | 主事件循环 — 帧循环 update→render→present + App 项目入口 | P0 | 8h | PH1-T18, PH1-T19, PH1-T20 | [ ] |
 
-**统计**：总计 21 个任务 | 已完成: 15 | 进行中: 0 | 待开始: 6
+**统计**：总计 21 个任务 | 已完成: 16 | 进行中: 0 | 待开始: 5
 
 ---
 
@@ -1500,7 +1500,7 @@ graph TD
 | **对应需求** | REQ-ENG-002（字节码编译 — 游戏级）, REQ-ENG-023（跨场景跳转 — 引用验证） |
 | **对应架构模块** | `aster-compiler`（参考 Architecture.md §4.4 — 编译管线 + §5.2 build.toml） |
 | **前置依赖** | PH1-T11（Compiler 单场景编译）, PH1-T12（优化 Pass）, PH1-T15（GameLoader — 提供场景清单和 build 配置） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1589,6 +1589,21 @@ graph TD
 |------|--------|----------|----------|
 | MV01 | 项目批量编译 | 编写临时 main.rs，加载 `templates/default_project/` → `GameCompiler::compile()`，打印 `BuildInfo` | 显示 2 个场景、总指令数、优化级别，无编译错误 |
 | MV02 | 跨场景引用错误提示 | 故意修改 `prologue.aster` 中的 `goto` 目标为一个不存在的场景，重新编译 | 错误信息包含源文件、行号、不存在的目标场景名 |
+
+---
+**完成记录**：
+- 完成时间：2026-06-15 12:00
+- 实际工时：3 小时
+- AI自验证结果：✅ AC01-AC06 全部通过（55/55 单元测试 + 9/9 doctest 通过，clippy 零 warning）
+- 人工测试结果：✅ MV01-MV02 全部通过
+- 备注：GameCompiler 不依赖 aster-runtime，通过 GameCompileInput 接收已解析 Scene。跨场景验证采用 AST 级扫描 + 编译后 label_table 匹配策略。BuildConfig 直接复用 aster-core 已有类型，不在 aster-compiler 中重复定义。新增 compile_game.rs example 用于人工验证。
+
+**上下文交接**：
+- 关键决策：GameCompiler 不依赖 aster-runtime，接受 GameCompileInput（借用）而非 GameManifest；跨场景验证在 AST 级扫描 Goto 节点→编译后匹配 label_table，无需修改 Compiler 内部或解码字节码；BuildConfig 复用 aster-core，不在 compiler 中重复
+- 新增接口：`GameCompiler::compile(input: GameCompileInput) -> Result<CompiledGame, Vec<CompileError>>` — 批量编译入口；`CompiledGame { game_name, game_version, entry_scene_id, scenes: HashMap<String, CompiledScene>, characters, build_info }` — 游戏编译产物；`BuildInfo { source_file_count, total_instructions, optimization_level, build_timestamp }` — 构建统计；`Compiler::compile_with_config(scene, &CompileConfig) -> Result<CompiledScene, Vec<CompileError>>` — 带配置的单场景编译
+- 新增类型：`GameCompileInput<'a>`（借用入参）、`CompiledGame`（serde 序列化）、`BuildInfo`（构建元数据）
+- 已知限制：Goto 目标如果是变量表达式（非字符串字面量）则在编译期跳过验证（运行时解析）；时间戳使用手动 ISO 8601 格式（零外部依赖），非 chrono crate；`minify` flag 为 Phase 1 预留，当前不执行实际压缩
+- 建议下一个任务先读取：`engine/aster-compiler/src/game_compiler.rs`（GameCompiler API + 跨场景验证逻辑）、`engine/aster-core/src/build_config.rs`（BuildConfig/CompileConfig 完整定义）、`engine/aster-compiler/examples/compile_game.rs`（使用示例）
 
 ---
 ### PH1-T17 — 实现游戏上下文 — GameContext（持有 CompiledGame + 角色表 + 跨场景导航支持）

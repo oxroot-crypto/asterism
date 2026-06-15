@@ -70,6 +70,7 @@
 pub mod bytecode;
 pub mod compiler;
 pub mod error;
+pub mod game_compiler;
 pub mod ir;
 pub mod optimizer;
 
@@ -77,4 +78,5 @@ pub mod optimizer;
 pub use bytecode::{CompiledScene, Opcode};
 pub use compiler::Compiler;
 pub use error::CompileError;
+pub use game_compiler::{BuildInfo, CompiledGame, GameCompileInput, GameCompiler};
 pub use optimizer::{OptimizeStats, Optimizer};
