@@ -5,6 +5,18 @@
 //!           协调 VM 和 Renderer 的交互。renderer 以参数形式传入 update/select_choice。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-15
+//! 最后修改：2026-06-15
+//!
+//! 依赖模块：
+//! - aster_core（TextSpeed 速度类型）
+//! - aster_renderer（TypewriterSpeed 打字机速度）
+//! - aster_vm（Vm / VmAction / EngineCommand / MenuChoiceData）
+//! - crate::command_bridge（Renderer trait + dispatch）
+//! - crate::dialogue_controller（DialogueController / DialogueAction / DialogueLine）
+//! - crate::game_context::GameContext
+//! - crate::error::RuntimeError
+//!
+//! 对应任务：PH1-T18 — 实现 SceneManager + Renderer trait 的真实实现
 
 use aster_renderer::TypewriterSpeed;
 use aster_vm::{EngineCommand, MenuChoiceData, Vm, VmAction};
@@ -25,14 +37,46 @@ fn to_typewriter_speed(speed: &aster_core::TextSpeed) -> TypewriterSpeed {
     }
 }
 
+/// 场景状态枚举 — 表示场景管理器的当前生命周期阶段。
+///
+/// SceneManager 通过此枚举跟踪场景执行的各个阶段，
+/// 控制 `update()` / `on_click()` / `select_choice()` 等方法的合法调用时机。
+///
+/// # 状态流转
+///
+/// ```text
+/// Idle → Loading → Playing ⇄ AtMenu
+///                   Playing → Paused → Playing
+///                   Playing → Transitioning → Playing
+///                   Playing → Ended
+/// ```
+///
+/// # 变体说明
+///
+/// | 变体 | 说明 |
+/// |------|------|
+/// | `Idle` | 初始状态，尚未加载任何场景 |
+/// | `Loading` | 正在加载场景资源（Phase 2 起使用） |
+/// | `Playing` | 正在执行场景指令（包括等待用户点击） |
+/// | `AtMenu` | 正在显示选择支菜单，等待玩家选择 |
+/// | `Paused` | 游戏暂停（用户打开设置面板等） |
+/// | `Transitioning` | 正在执行场景转场动画 |
+/// | `Ended` | 当前场景已执行完毕 |
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SceneState {
+    /// 初始状态 — 尚未加载任何场景
     Idle,
+    /// 正在加载场景资源（Phase 2 起使用）
     Loading,
+    /// 正在执行场景指令
     Playing,
+    /// 正在显示选择支菜单
     AtMenu,
+    /// 游戏已暂停
     Paused,
+    /// 正在执行场景转场动画
     Transitioning,
+    /// 当前场景已结束
     Ended,
 }
 
@@ -59,7 +103,24 @@ struct MenuState {
 
 const MAX_STEPS_PER_UPDATE: usize = 50_000;
 
-/// 场景管理器。
+/// 场景管理器 — 协调 VM 执行与 Renderer 渲染的核心控制器。
+///
+/// 负责场景生命周期的完整管理：
+/// - 场景加载/卸载（`load_scene`）
+/// - 驱动 VM 逐指令执行（`update`）
+/// - 处理用户输入（`on_click` / `on_key_press` / `select_choice`）
+/// - 对话流管理（通过 `DialogueController` 控制打字机动画和点击推进）
+/// - 跨场景跳转（Goto 指令处理）
+///
+/// # 字段说明
+/// - `ctx`：游戏上下文（持有编译后的场景字节码 + 角色表）
+/// - `vm`：字节码虚拟机（执行 CompiledScene 指令）
+/// - `state`：当前场景状态（Playing / AtMenu / Ended 等）
+/// - `current_scene_id`：当前活动的场景 ID
+/// - `current_menu`：当前显示的选择支菜单状态（仅在 AtMenu 状态下为 Some）
+/// - `command_log`：已执行的渲染/音频命令历史（用于调试和重放）
+/// - `steps_this_update`：当前 update() 调用中已执行的 VM 步数（防无限循环）
+/// - `dialogue_controller`：对话流管理器（打字机动画 + 文本缓冲队列）
 pub struct SceneManager {
     ctx: GameContext,
     vm: Vm,

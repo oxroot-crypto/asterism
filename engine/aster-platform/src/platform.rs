@@ -312,7 +312,13 @@ pub(crate) fn normalize_path_string(raw: &str) -> String {
     let mut result = raw.replace('\\', "/");
     // 步骤2：移除 Windows 长路径前缀 `\\?\`
     if result.starts_with("//?/") {
-        result = result[4..].to_string();
+        let after_prefix = &result[4..];
+        // `\\?\UNC\server\share\...` → 还原为 UNC 路径 `//server/share/...`
+        if let Some(unc_path) = after_prefix.strip_prefix("UNC/") {
+            result = format!("//{unc_path}");
+        } else {
+            result = after_prefix.to_string();
+        }
     }
     // 步骤3：合并连续的正斜杠（保留开头的双斜杠用于 UNC 路径）
     let prefix = if result.starts_with("//") && !result.starts_with("///") {
@@ -323,7 +329,9 @@ pub(crate) fn normalize_path_string(raw: &str) -> String {
     let rest = if prefix.is_empty() {
         result.as_str()
     } else {
-        &result[2..]
+        // 去除开头的 "//" 后再去除前导斜杠，防止形成 "///" 前缀
+        let without_prefix = &result[2..];
+        without_prefix.trim_start_matches('/')
     };
     let mut normalized = String::with_capacity(rest.len());
     let mut prev_was_slash = false;
@@ -447,6 +455,25 @@ mod tests {
     #[test]
     fn test_normalize_path_string_preserves_unc_prefix() {
         let result = normalize_path_string("//server/share/path");
-        assert!(result.starts_with("//"));
+        // 应该以 "//" 开头，但不能有多余的前导斜杠（即不应变成 "///"）
+        assert!(
+            result.starts_with("//"),
+            "UNC 路径应以 // 开头，实际: {result}"
+        );
+        assert!(
+            !result.starts_with("///"),
+            "UNC 路径不应有 /// 前缀，实际: {result}"
+        );
+        assert_eq!(result, "//server/share/path", "UNC 路径应保持原样");
+    }
+
+    #[test]
+    fn test_normalize_path_string_extended_unc_prefix() {
+        // \\?\UNC\server\share\path → //server/share/path
+        let result = normalize_path_string("//?/UNC/server/share/path");
+        assert_eq!(
+            result, "//server/share/path",
+            "扩展 UNC 前缀应转换为标准 UNC"
+        );
     }
 }

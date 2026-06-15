@@ -326,14 +326,32 @@ pub fn effect_size(param_count: usize) -> usize {
 }
 
 /// 从字节数组读取 little-endian u16（非推进式索引）。
+///
+/// # Panic
+/// 当 `pos + 2 > bytes.len()` 时 panic（调用方负责确保边界安全）。
 #[inline]
 pub fn read_u16(bytes: &[u8], pos: usize) -> u16 {
+    debug_assert!(
+        pos + 2 <= bytes.len(),
+        "read_u16: 索引 {} 越界，字节数组长度 {}",
+        pos,
+        bytes.len()
+    );
     u16::from_le_bytes([bytes[pos], bytes[pos + 1]])
 }
 
 /// 从字节数组读取 little-endian i64（非推进式索引）。
+///
+/// # Panic
+/// 当 `pos + 8 > bytes.len()` 时 panic（调用方负责确保边界安全）。
 #[inline]
 pub fn read_i64(bytes: &[u8], pos: usize) -> i64 {
+    debug_assert!(
+        pos + 8 <= bytes.len(),
+        "read_i64: 索引 {} 越界，字节数组长度 {}",
+        pos,
+        bytes.len()
+    );
     i64::from_le_bytes([
         bytes[pos],
         bytes[pos + 1],
@@ -347,8 +365,17 @@ pub fn read_i64(bytes: &[u8], pos: usize) -> i64 {
 }
 
 /// 从字节数组读取 little-endian f64（非推进式索引）。
+///
+/// # Panic
+/// 当 `pos + 8 > bytes.len()` 时 panic（调用方负责确保边界安全）。
 #[inline]
 pub fn read_f64(bytes: &[u8], pos: usize) -> f64 {
+    debug_assert!(
+        pos + 8 <= bytes.len(),
+        "read_f64: 索引 {} 越界，字节数组长度 {}",
+        pos,
+        bytes.len()
+    );
     f64::from_le_bytes([
         bytes[pos],
         bytes[pos + 1],
@@ -416,6 +443,22 @@ pub struct CompiledScene {
 /// 字节码编码/解码中的 helper：将 u16 以 little-endian 写入字节数组。
 fn write_u16(buf: &mut Vec<u8>, value: u16) {
     buf.extend_from_slice(&value.to_le_bytes());
+}
+
+/// 将跳转偏移写入字节数组（2 字节 little-endian）。
+///
+/// # Panic
+/// 当偏移超过 u16::MAX（65535）时 panic。单个场景字节码超过此限制属于极端情况，
+/// 应在编译前检测并通过结构化错误返回，而非运行时静默截断。
+fn write_offset(buf: &mut Vec<u8>, offset: usize, label_name: &str) {
+    assert!(
+        offset <= u16::MAX as usize,
+        "场景字节码过大：标签 \"{}\" 的偏移 {} 超出 u16 最大值 {}，请拆分场景",
+        label_name,
+        offset,
+        u16::MAX
+    );
+    write_u16(buf, offset as u16);
 }
 
 /// 从字节数组读取 little-endian u16（推进式索引，内部用）。
@@ -532,7 +575,7 @@ pub fn encode_instructions(
                     write_u16(&mut bytes, choice.text_idx);
                     // 解析 target 标签名为字节偏移
                     let target_offset = label_map.get(&choice.target).copied().unwrap_or(0);
-                    write_u16(&mut bytes, target_offset as u16);
+                    write_offset(&mut bytes, target_offset, &choice.target);
                     write_u16(&mut bytes, choice.condition_flag_idx);
                 }
             }
@@ -865,24 +908,24 @@ fn encode_instruction(inst: &IrInstruction, label_map: &HashMap<String, usize>, 
         IrInstruction::Jump { target } => {
             buf.push(Opcode::Jump as u8);
             let offset = label_map.get(target).copied().unwrap_or(0);
-            write_u16(buf, offset as u16);
+            write_offset(buf, offset, target);
         }
         IrInstruction::JumpIf { reg, target } => {
             buf.push(Opcode::JumpIf as u8);
             buf.push(*reg);
             let offset = label_map.get(target).copied().unwrap_or(0);
-            write_u16(buf, offset as u16);
+            write_offset(buf, offset, target);
         }
         IrInstruction::JumpIfFlag { flag_idx, target } => {
             buf.push(Opcode::JumpIfFlag as u8);
             write_u16(buf, *flag_idx);
             let offset = label_map.get(target).copied().unwrap_or(0);
-            write_u16(buf, offset as u16);
+            write_offset(buf, offset, target);
         }
         IrInstruction::Call { target, args } => {
             buf.push(Opcode::Call as u8);
             let offset = label_map.get(target).copied().unwrap_or(0);
-            write_u16(buf, offset as u16);
+            write_offset(buf, offset, target);
             buf.push(args.len() as u8);
             for reg in args {
                 buf.push(*reg);

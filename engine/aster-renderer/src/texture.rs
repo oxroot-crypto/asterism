@@ -241,6 +241,25 @@ impl Texture {
         });
 
         // 步骤 4：上传像素数据到 GPU
+        // wgpu 要求 COPY_BYTES_PER_ROW_ALIGNMENT 为 256 的倍数
+        let raw_bytes_per_row = 4 * width; // RGBA8 = 每像素 4 字节
+        let aligned_bytes_per_row = raw_bytes_per_row.div_ceil(256) * 256;
+
+        // 如果对齐宽度与原始宽度不同，需要对像素数据进行 padding
+        let padded_pixels = if aligned_bytes_per_row == raw_bytes_per_row {
+            pixels
+        } else {
+            let padded_size = (aligned_bytes_per_row * height) as usize;
+            let mut padded = vec![0u8; padded_size];
+            for row in 0..height as usize {
+                let src_start = row * raw_bytes_per_row as usize;
+                let dst_start = row * aligned_bytes_per_row as usize;
+                padded[dst_start..dst_start + raw_bytes_per_row as usize]
+                    .copy_from_slice(&pixels[src_start..src_start + raw_bytes_per_row as usize]);
+            }
+            padded
+        };
+
         queue.write_texture(
             TexelCopyTextureInfo {
                 texture: &gpu_texture,
@@ -248,10 +267,10 @@ impl Texture {
                 origin: Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &pixels,
+            &padded_pixels,
             TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * width), // RGBA8 = 每像素 4 字节
+                bytes_per_row: Some(aligned_bytes_per_row),
                 rows_per_image: Some(height),
             },
             texture_size,

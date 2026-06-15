@@ -41,7 +41,9 @@ pub struct GameRenderer {
     sprite_front: SpriteLayer,
     text_renderer: TextRenderer,
     texture_cache: HashMap<String, Texture>,
-    char_sprites: HashMap<String, (u64, u8)>,
+    /// 角色→立绘映射：(sprite_id, layer, position_byte)
+    /// layer: 0=后层, 1=前层; position_byte: VM 位置编码(0=左,1=中,2=右)
+    char_sprites: HashMap<String, (u64, u8, u8)>,
     sprite_ids: HashMap<String, u64>,
     /// 项目根目录（用于解析资产相对路径）
     project_root: std::path::PathBuf,
@@ -184,14 +186,7 @@ impl Renderer for GameRenderer {
     }
 
     fn show_character(&mut self, char_id: &str, sprite_path: &str, position: u8) {
-        // 如果该角色已有立绘，先移除旧的
-        if let Some(&(old_id, _)) = self.char_sprites.get(char_id) {
-            self.sprite_back.remove_sprite(old_id);
-            self.sprite_front.remove_sprite(old_id);
-            self.char_sprites.remove(char_id);
-        }
-
-        // 加载纹理
+        // 步骤 1：先加载新纹理（在移除旧精灵之前，保证原子性）
         let texture = match Texture::from_file(
             &self.device,
             &self.queue,
@@ -199,23 +194,32 @@ impl Renderer for GameRenderer {
             None,
         ) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(_) => return, // 加载失败，保留旧立绘不变
         };
 
+        // 步骤 2：纹理加载成功后，移除旧立绘
+        if let Some(&(old_id, old_layer, _)) = self.char_sprites.get(char_id) {
+            if old_layer == 0 {
+                self.sprite_back.remove_sprite(old_id);
+            } else {
+                self.sprite_front.remove_sprite(old_id);
+            }
+        }
+
+        // 步骤 3：添加新立绘
         let sprite_pos = Self::pos_byte_to_sprite_position(position);
         let desc = SpriteDescriptor::new(sprite_pos);
 
-        // 添加到立绘前层（立绘通常在文本之上、背景之上）
         let sprite_id = self
             .sprite_front
             .add_sprite(&self.device, &self.queue, texture, desc);
 
         self.char_sprites
-            .insert(char_id.to_string(), (sprite_id, 1)); // layer=1 (front)
+            .insert(char_id.to_string(), (sprite_id, 1, position)); // layer=1(front), 保存位置
     }
 
     fn hide_character(&mut self, char_id: &str) {
-        if let Some(&(sprite_id, layer)) = self.char_sprites.get(char_id) {
+        if let Some(&(sprite_id, layer, _)) = self.char_sprites.get(char_id) {
             if layer == 0 {
                 self.sprite_back.remove_sprite(sprite_id);
             } else {
@@ -225,34 +229,34 @@ impl Renderer for GameRenderer {
         }
     }
 
-    fn move_character(&mut self, char_id: &str, _position: u8) {
-        // Phase 1 简化：移除后重新添加（完整实现需要 SpriteLayer::update_sprite_position）
-        // 当前 SpriteLayer 不支持原地修改位置，采用 remove+add 策略
-        if let Some(&(old_id, layer)) = self.char_sprites.get(char_id) {
-            // 需要重新加载纹理... 当前简化：仅移除
-            if layer == 0 {
-                self.sprite_back.remove_sprite(old_id);
-            } else {
-                self.sprite_front.remove_sprite(old_id);
+    fn move_character(&mut self, char_id: &str, position: u8) {
+        // 使用 SpriteLayer::update_position 原地更新位置，无需移除/重新添加
+        if let Some(&(sprite_id, layer, old_position)) = self.char_sprites.get(char_id) {
+            if position == old_position {
+                return; // 位置未变，跳过
             }
-            self.char_sprites.remove(char_id);
-            // 注意：move_character 后角色仍在显示，但 Phase 1 无法保留纹理引用
-            // 完整的 Phase 4 实现应使用 Texture::id 来缓存纹理引用
+            let sprite_pos = Self::pos_byte_to_sprite_position(position);
+            if layer == 0 {
+                self.sprite_back
+                    .update_position(&self.queue, sprite_id, sprite_pos);
+            } else {
+                self.sprite_front
+                    .update_position(&self.queue, sprite_id, sprite_pos);
+            }
+            // 更新位置记录
+            self.char_sprites
+                .insert(char_id.to_string(), (sprite_id, layer, position));
         }
     }
 
     fn set_emotion(&mut self, char_id: &str, sprite_path: &str) {
-        // 切换表情 = 原地替换立绘纹理
-        // 先移除旧立绘，再显示新立绘（保持位置不变）
-        if let Some(&(old_id, layer)) = self.char_sprites.get(char_id) {
-            if layer == 0 {
-                self.sprite_back.remove_sprite(old_id);
-            } else {
-                self.sprite_front.remove_sprite(old_id);
-            }
-            self.char_sprites.remove(char_id);
-        }
+        // 步骤 1：保存当前角色的位置和图层信息
+        let (old_id, layer, position) = match self.char_sprites.get(char_id).copied() {
+            Some(info) => info,
+            None => return, // 角色未显示，直接返回
+        };
 
+        // 步骤 2：先加载新纹理（在移除旧精灵之前，保证原子性）
         let texture = match Texture::from_file(
             &self.device,
             &self.queue,
@@ -260,15 +264,30 @@ impl Renderer for GameRenderer {
             None,
         ) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(_) => return, // 加载失败，保留旧立绘
         };
 
-        let desc = SpriteDescriptor::new(SpritePosition::Center);
-        let sprite_id = self
-            .sprite_front
-            .add_sprite(&self.device, &self.queue, texture, desc);
+        // 步骤 3：移除旧立绘
+        if layer == 0 {
+            self.sprite_back.remove_sprite(old_id);
+        } else {
+            self.sprite_front.remove_sprite(old_id);
+        }
+
+        // 步骤 4：添加新立绘，保持原位置
+        let sprite_pos = Self::pos_byte_to_sprite_position(position);
+        let desc = SpriteDescriptor::new(sprite_pos);
+
+        let sprite_id = if layer == 0 {
+            self.sprite_back
+                .add_sprite(&self.device, &self.queue, texture, desc)
+        } else {
+            self.sprite_front
+                .add_sprite(&self.device, &self.queue, texture, desc)
+        };
+
         self.char_sprites
-            .insert(char_id.to_string(), (sprite_id, 1));
+            .insert(char_id.to_string(), (sprite_id, layer, position));
     }
 
     fn show_sprite(&mut self, path: &str, x: f32, y: f32, scale: f32, alpha: f32) {

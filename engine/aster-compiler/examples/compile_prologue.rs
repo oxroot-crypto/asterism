@@ -1,4 +1,4 @@
-//! Asterism — 编译器人工验证示例
+//! Asterism — Galgame/ADV 游戏引擎
 //!
 //! 文件路径：engine/aster-compiler/examples/compile_prologue.rs
 //! 功能概述：读取 `templates/default_project/scripts/prologue.aster`，

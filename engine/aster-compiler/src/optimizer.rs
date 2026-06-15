@@ -496,6 +496,10 @@ impl Optimizer {
     }
 
     /// 尝试对比较运算进行常量折叠。
+    ///
+    /// 比较策略：
+    /// - 两个整型 → 整数比较（保持 i64 精度，避免 f64 的 53-bit mantissa 截断）
+    /// - 至少一个浮点 → 转为 f64 比较（IEEE 754 语义）
     fn fold_comparison(
         &self,
         inst: &IrInstruction,
@@ -514,20 +518,34 @@ impl Optimizer {
             _ => return None,
         };
 
-        let a = match constants.get(&left) {
-            Some(ConstValue::Int(v)) => Some(*v as f64),
-            Some(ConstValue::Float(v)) => Some(*v),
-            _ => None,
-        };
-        let b = match constants.get(&right) {
-            Some(ConstValue::Int(v)) => Some(*v as f64),
-            Some(ConstValue::Float(v)) => Some(*v),
-            _ => None,
-        };
-        if let (Some(a), Some(b)) = (a, b) {
-            return Some(cmp_fn(a, b));
+        let left_val = constants.get(&left)?;
+        let right_val = constants.get(&right)?;
+
+        // 两个整型：使用整数语义比较，避免 f64 精度丢失
+        if let (ConstValue::Int(a), ConstValue::Int(b)) = (left_val, right_val) {
+            return Some(match inst {
+                IrInstruction::Eq { .. } => a == b,
+                IrInstruction::Neq { .. } => a != b,
+                IrInstruction::Lt { .. } => a < b,
+                IrInstruction::Gt { .. } => a > b,
+                IrInstruction::Le { .. } => a <= b,
+                IrInstruction::Ge { .. } => a >= b,
+                _ => return None,
+            });
         }
-        None
+
+        // 至少一个浮点：转为 f64 比较
+        let a = match left_val {
+            ConstValue::Int(v) => *v as f64,
+            ConstValue::Float(v) => *v,
+            _ => return None,
+        };
+        let b = match right_val {
+            ConstValue::Int(v) => *v as f64,
+            ConstValue::Float(v) => *v,
+            _ => return None,
+        };
+        Some(cmp_fn(a, b))
     }
 
     // ========================================================================

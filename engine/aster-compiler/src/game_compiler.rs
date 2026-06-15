@@ -308,6 +308,22 @@ impl GameCompiler {
         // ── Step 3: 跨场景引用验证 ──────────────────────────────────────
         validate_cross_scene_references(input.scenes, &compiled_scenes, &mut errors);
 
+        // ── Step 3.5: 验证 entry_scene_id 存在于已编译场景中 ─────────────
+        // 空场景列表时不验证（允许空项目编译）
+        if !compiled_scenes.is_empty() && !compiled_scenes.contains_key(input.entry_scene_id) {
+            let available: Vec<&str> = compiled_scenes.keys().map(|s| s.as_str()).collect();
+            errors.push(CompileError {
+                message: format!(
+                    "入口场景 \"{}\" 不存在于已编译的场景列表中。可用场景：{}",
+                    input.entry_scene_id,
+                    available.join(", ")
+                ),
+                line: 0,
+                column: 0,
+                hint: Some("请检查 aster.toml 中的 entry_scene 配置".to_string()),
+            });
+        }
+
         if !errors.is_empty() {
             return Err(errors);
         }

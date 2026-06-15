@@ -525,9 +525,11 @@ impl TextRenderer {
                 compilation_options: Default::default(),
                 targets: &[Some(ColorTargetState {
                     format: surface_format,
+                    // 预乘 Alpha 混合：着色器已输出预乘值 (rgb*a, a)
+                    // 混合公式：1 * src + (1 - src_alpha) * dst
                     blend: Some(BlendState {
                         color: BlendComponent {
-                            src_factor: BlendFactor::SrcAlpha,
+                            src_factor: BlendFactor::One,
                             dst_factor: BlendFactor::OneMinusSrcAlpha,
                             operation: BlendOperation::Add,
                         },

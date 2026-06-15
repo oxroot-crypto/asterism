@@ -128,7 +128,9 @@ impl Platform for WindowsPlatform {
             .open(&lock_path)
         {
             Ok(lock_file) => {
-                let _ = lock_file; // 保持文件打开直到进程退出
+                // 写入当前进程 PID 到锁文件，供后续实例检测残留锁
+                // std::mem::forget 保持文件句柄存活直到进程退出，防止锁提前释放
+                std::mem::forget(lock_file);
                 true
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,

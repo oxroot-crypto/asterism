@@ -105,11 +105,9 @@ impl Platform for LinuxPlatform {
         {
             Ok(_lock_file) => {
                 // 锁文件创建成功 → 当前是第一个实例
-                // 注意：文件在进程退出时自动关闭，锁随之释放
-                // 通过 std::mem::forget 保持文件句柄存活
-                // 实际上，由于 Rust 进程的生命周期，锁文件在进程退出后需手动清理
-                // 这里仅检查 create_new 是否成功作为简单的锁机制
-                let _ = _lock_file; // 保持文件打开直到 drop
+                // std::mem::forget 保持文件句柄存活直到进程退出，防止锁提前释放
+                // Phase 2：写入 PID + 检测残留锁以区分运行实例和崩溃残留
+                std::mem::forget(_lock_file);
                 true
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {

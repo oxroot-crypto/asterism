@@ -590,12 +590,35 @@ impl Vm {
                 // 交互指令 — Menu
                 // ══════════════════════════════════════════════════════════════
                 Opcode::Menu => {
+                    // 检查 PC 是否在有效范围内（opcode + 3 字节头）
+                    if self.pc + 4 > instructions.len() {
+                        return VmAction::Command(EngineCommand::Error {
+                            message: format!(
+                                "Menu: PC {} 越界（字节码长度 {}）",
+                                self.pc,
+                                instructions.len()
+                            ),
+                        });
+                    }
                     let prompt_idx = opcode::read_u16(instructions, self.pc + 1);
-                    let choice_count = instructions[self.pc + 3] as usize;
+                    let choice_count_raw = instructions[self.pc + 3] as usize;
+                    // 限制最大选项数，防止损坏字节码导致超大分配
+                    const MAX_MENU_CHOICES: usize = 32;
+                    let choice_count = choice_count_raw.min(MAX_MENU_CHOICES);
                     let mut choices = Vec::with_capacity(choice_count);
 
                     let mut pos = self.pc + 4;
                     for _ in 0..choice_count {
+                        // 每个 choice 占 6 字节，确保不越界
+                        if pos + 6 > instructions.len() {
+                            return VmAction::Command(EngineCommand::Error {
+                                message: format!(
+                                    "Menu: choice 数据越界（pos={}，字节码长度 {}）",
+                                    pos,
+                                    instructions.len()
+                                ),
+                            });
+                        }
                         let text_idx = opcode::read_u16(instructions, pos);
                         pos += 2;
                         let target_offset = opcode::read_u16(instructions, pos);
@@ -680,12 +703,35 @@ impl Vm {
                 // 特效指令
                 // ══════════════════════════════════════════════════════════════
                 Opcode::Effect => {
+                    // 检查 PC 是否在有效范围内
+                    if self.pc + 4 > instructions.len() {
+                        return VmAction::Command(EngineCommand::Error {
+                            message: format!(
+                                "Effect: PC {} 越界（字节码长度 {}）",
+                                self.pc,
+                                instructions.len()
+                            ),
+                        });
+                    }
                     let type_idx = opcode::read_u16(instructions, self.pc + 1);
-                    let param_count = instructions[self.pc + 3] as usize;
+                    let param_count_raw = instructions[self.pc + 3] as usize;
+                    // 限制最大参数数，防止损坏字节码导致超大分配
+                    const MAX_EFFECT_PARAMS: usize = 64;
+                    let param_count = param_count_raw.min(MAX_EFFECT_PARAMS);
                     let mut params = Vec::with_capacity(param_count);
 
                     let mut pos = self.pc + 4;
                     for _ in 0..param_count {
+                        // 每个 param 占 4 字节，确保不越界
+                        if pos + 4 > instructions.len() {
+                            return VmAction::Command(EngineCommand::Error {
+                                message: format!(
+                                    "Effect: param 数据越界（pos={}，字节码长度 {}）",
+                                    pos,
+                                    instructions.len()
+                                ),
+                            });
+                        }
                         let key_idx = opcode::read_u16(instructions, pos);
                         pos += 2;
                         let value_reg = opcode::read_u16(instructions, pos);
@@ -976,6 +1022,13 @@ impl Vm {
             "Div" => match (lv, rv) {
                 (_, Value::Int(0)) => return Err("Div: 除零".to_string()),
                 (_, Value::Float(f)) if *f == 0.0 => return Err("Div: 除零".to_string()),
+                // i64::MIN / -1 在任何构建模式下都会 panic（溢出）
+                (Value::Int(a), Value::Int(b)) if *a == i64::MIN && *b == -1 => {
+                    return Err(format!(
+                        "Div: {} / -1 溢出（i64::MIN 取反后超出 i64 范围）",
+                        i64::MIN
+                    ));
+                }
                 (Value::Int(a), Value::Int(b)) => Value::Int(a / b),
                 (Value::Int(a), Value::Float(b)) => Value::Float(*a as f64 / b),
                 (Value::Float(a), Value::Int(b)) => Value::Float(a / *b as f64),
@@ -1130,11 +1183,33 @@ impl Vm {
                 message: format!("Call: 调用栈深度超过 256（偏移 {}）", self.pc),
             });
         }
+        // 检查 PC 是否在有效范围内
+        if self.pc + 4 > instructions.len() {
+            return Some(EngineCommand::Error {
+                message: format!(
+                    "Call: PC {} 越界（字节码长度 {}）",
+                    self.pc,
+                    instructions.len()
+                ),
+            });
+        }
         let target = opcode::read_u16(instructions, self.pc + 1) as usize;
-        let arg_count = instructions[self.pc + 3] as usize;
+        let arg_count_raw = instructions[self.pc + 3] as usize;
+        // 限制最大参数数，防止损坏字节码导致超大分配/越界
+        const MAX_CALL_ARGS: usize = 16;
+        let arg_count = arg_count_raw.min(MAX_CALL_ARGS);
         // 将参数寄存器值压入操作数栈（供子例程内部读取）
         let mut pos = self.pc + 4;
         for _ in 0..arg_count {
+            if pos >= instructions.len() {
+                return Some(EngineCommand::Error {
+                    message: format!(
+                        "Call: arg 数据越界（pos={}，字节码长度 {}）",
+                        pos,
+                        instructions.len()
+                    ),
+                });
+            }
             let reg = instructions[pos] as usize;
             if reg < 16 {
                 self.stack.push(self.registers[reg].clone());
@@ -1184,7 +1259,21 @@ impl Vm {
     fn exec_set_var(&mut self, bytecode: &CompiledScene) -> Result<(), String> {
         let instructions = &bytecode.instructions;
         let name_idx = opcode::read_u16(instructions, self.pc + 1) as usize;
+        if name_idx >= bytecode.constant_pool.len() {
+            return Err(format!(
+                "SetVar: 池索引 {} 越界（大小 {}，偏移 {}）",
+                name_idx,
+                bytecode.constant_pool.len(),
+                self.pc
+            ));
+        }
         let value_reg = instructions[self.pc + 3] as usize;
+        if value_reg >= 16 {
+            return Err(format!(
+                "SetVar: 非法寄存器 r{}（偏移 {}）",
+                value_reg, self.pc
+            ));
+        }
         let var_name = bytecode.constant_pool[name_idx].clone();
         self.variables
             .set(var_name, self.registers[value_reg].clone());
@@ -1195,6 +1284,14 @@ impl Vm {
     fn exec_set_flag(&mut self, bytecode: &CompiledScene) -> Result<(), String> {
         let instructions = &bytecode.instructions;
         let flag_idx = opcode::read_u16(instructions, self.pc + 1) as usize;
+        if flag_idx >= bytecode.constant_pool.len() {
+            return Err(format!(
+                "SetFlag: 池索引 {} 越界（大小 {}，偏移 {}）",
+                flag_idx,
+                bytecode.constant_pool.len(),
+                self.pc
+            ));
+        }
         let flag_name = bytecode.constant_pool[flag_idx].clone();
         self.flags.set(flag_name);
         self.pc += instruction_size(Opcode::SetFlag);
@@ -1204,6 +1301,14 @@ impl Vm {
     fn exec_unset_flag(&mut self, bytecode: &CompiledScene) -> Result<(), String> {
         let instructions = &bytecode.instructions;
         let flag_idx = opcode::read_u16(instructions, self.pc + 1) as usize;
+        if flag_idx >= bytecode.constant_pool.len() {
+            return Err(format!(
+                "UnsetFlag: 池索引 {} 越界（大小 {}，偏移 {}）",
+                flag_idx,
+                bytecode.constant_pool.len(),
+                self.pc
+            ));
+        }
         let flag_name = &bytecode.constant_pool[flag_idx].clone();
         self.flags.unset(flag_name);
         self.pc += instruction_size(Opcode::UnsetFlag);
@@ -1213,6 +1318,14 @@ impl Vm {
     fn exec_toggle_flag(&mut self, bytecode: &CompiledScene) -> Result<(), String> {
         let instructions = &bytecode.instructions;
         let flag_idx = opcode::read_u16(instructions, self.pc + 1) as usize;
+        if flag_idx >= bytecode.constant_pool.len() {
+            return Err(format!(
+                "ToggleFlag: 池索引 {} 越界（大小 {}，偏移 {}）",
+                flag_idx,
+                bytecode.constant_pool.len(),
+                self.pc
+            ));
+        }
         let flag_name = &bytecode.constant_pool[flag_idx].clone();
         self.flags.toggle(flag_name);
         self.pc += instruction_size(Opcode::ToggleFlag);
