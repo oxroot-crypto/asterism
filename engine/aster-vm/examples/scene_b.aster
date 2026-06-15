@@ -1,0 +1,51 @@
+-- scene_b.aster — 中转场景（多入口 + 跨场景验证 + 跳转 scene_c/prologue/scene_a）
+
+scene "scene_b" {
+    description: "PH1-T14 scene_b — 多入口验证 + 多向 Goto"
+
+    $scene_b_visited = true
+    set %scene_b_flag
+
+    -- ══ 入口（无 label: goto scene_b）══
+    narration "── 到达 scene_b（入口）──"
+
+    if $entry_score == 100 {
+        narration "✅ scene_b: entry_score = " + $entry_score
+    }
+    if %entry_flag {
+        narration "✅ scene_b: entry_flag 保持"
+    }
+    $visit_count = $visit_count + 1
+    narration "ℹ visit_count = " + $visit_count
+    jump "b_goto_menu"
+
+    -- ══ from_a 入口（goto scene_b label:from_a）══
+    label "from_a"
+    narration "── 到达 scene_b（from_a 入口）──"
+    if $scene_a_visited == true {
+        narration "✅ scene_b(from_a): 确认来自 scene_a"
+    }
+    $visit_count = $visit_count + 1
+    narration "ℹ visit_count = " + $visit_count
+
+    -- ══ alternate_start 入口（goto scene_b label:alternate_start）══
+    label "alternate_start"
+    narration "── 到达 scene_b（alternate_start 入口）──"
+    if $entry_score == 100 and %entry_flag {
+        narration "✅ scene_b(alt): entry_score 和 entry_flag 都正常"
+    }
+
+    -- ══ Goto 跳转菜单 ══
+    label "b_goto_menu"
+    menu "scene_b — 下一步？" {
+        "→ scene_c（最终场景）" {
+            goto "scene_c"
+        }
+        "→ 回 prologue" {
+            goto "prologue" label: "main"
+        }
+        "→ scene_a" {
+            goto "scene_a"
+        }
+    }
+}

@@ -1,0 +1,51 @@
+-- prologue.aster — PH1-T14 项目入口（多场景跳转演示）
+-- 用法: cargo run -p aster-vm --example run_project engine/aster-vm/examples --entry prologue
+
+scene "prologue" {
+    description: "PH1-T14 入口 — 多场景 Goto 跳转链"
+
+    -- ══ 全局变量初始化（跨所有场景保持）══
+    $player = "测试员"
+    $visit_count = 0
+    $entry_score = 100
+    set %init_done
+    set %entry_flag
+
+    label "main"
+
+    narration "══════════════════════════════════════"
+    narration "  Asterism PH1-T14 多场景跳转演示"
+    narration "  变量将在所有场景间保持"
+    narration "══════════════════════════════════════"
+
+    -- 演示基本运算
+    $x = 42
+    $y = 10
+    $z = $x + $y
+    narration "prologue: x + y = " + $z
+
+    -- 选择下一步跳转目标
+    menu "从入口要去哪里, " + $player + "？" {
+        "→ scene_a（主测试场景）" {
+            $visit_count = $visit_count + 1
+            narration "选择 scene_a"
+            goto "scene_a"
+        }
+        "→ scene_b（备用入口 alternate_start）" {
+            $visit_count = $visit_count + 1
+            narration "选择 scene_b (alternate_start)"
+            goto "scene_b" label: "alternate_start"
+        }
+        "→ scene_c（最终场景）" {
+            $visit_count = $visit_count + 1
+            narration "选择 scene_c"
+            goto "scene_c"
+        }
+        "退出" {
+            jump "end"
+        }
+    }
+
+    label "end"
+    narration "结束"
+}

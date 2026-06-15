@@ -224,7 +224,8 @@ export async function checkSyntax(source: string): Promise<Diagnostic[]> {
 ### 2.3 .aster DSL 设计规范
 
 - 语法采用缩进敏感风格，缩进为 2 空格
-- 关键字使用英文小写（`scene` / `show` / `menu` / `if` / `jump` 等）
+- 关键字使用英文小写（`scene` / `show` / `menu` / `if` / `jump` / `sub` 等）
+- `sub "name" { ... }` 定义子例程，仅 `name()` 函数式调用可调用，主流程自动跳过
 - 字符串字面量使用双引号 `"`
 - 注释使用 `--` 前缀
 - 变量引用使用 `$` 前缀 (`$affection_score`)
@@ -280,13 +281,15 @@ export async function checkSyntax(source: string): Promise<Diagnostic[]> {
 
 ### 3.3 提交前自检清单
 
-在提交代码前，AI 必须自行完成以下检查：
+在提交代码前，AI 必须自行完成以下检查。
 
-- [ ] `cargo fmt --check` 通过
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` 通过（零 warning）
-- [ ] `cargo test --workspace` 通过
-- [ ] `pnpm --dir ide typecheck` 通过
-- [ ] `pnpm --dir ide lint` 通过
+> 注：以下 **粗体** 项已通过 `.githooks/pre-commit` 自动化执行（见 3.5 节），其余为人工检查项。
+
+- [ ] **`cargo fmt --check` 通过**（Hook Step 2 自动执行）
+- [ ] **`cargo clippy --workspace --exclude aster-ide --all-targets -- -D warnings` 通过**（Hook Step 3 自动执行）
+- [ ] **`cargo test --workspace --exclude aster-ide` 通过**（Hook Step 4 自动执行）
+- [ ] **`pnpm --dir ide typecheck` 通过**（Hook Step 6 自动执行）
+- [ ] **`pnpm --dir ide lint` 通过**（Hook Step 5 自动执行）
 - [ ] 新增的公开函数/类型有完整的中文 docstring / JSDoc
 - [ ] 没有遗留的 `unwrap()` / `expect()` / `todo!()` / `unimplemented!()`（除非有明确的 Issue 追踪）
 - [ ] 没有硬编码的魔法数字（均应定义为命名常量）
@@ -325,6 +328,56 @@ Thumbs.db
 - 依赖目录（`node_modules/`）
 - 操作系统的元数据文件
 - 用户的本地 IDE 配置（`.vscode/` 除外，允许共享推荐扩展和调试配置）
+
+### 3.5 Git Hook — 提交前本地校验（镜像 CI 管线）
+
+项目通过 `.githooks/pre-commit` 在每次 `git commit` 前**自动执行与 CI 管线一致的本地校验**，确保提交的代码能通过 CI 门禁。
+
+**Hook 文件**：`.githooks/pre-commit`
+
+**校验步骤（与 `.github/workflows/ci-*.yml` 顺序一致）**：
+
+| Hook Step | CI 对应 | 校验项 | 变更范围 | 说明 |
+|-----------|---------|--------|---------|------|
+| Step 0 | — | 变更类型检测 | — | 自动识别 `.rs` / `.ts` / `.vue` 变更 |
+| Step 1 | ci-rust Step 4 前置 | `cargo fmt --all` | Rust | 自动格式化 + 重新暂存（自动修复） |
+| Step 2 | ci-rust Step 4 | `cargo fmt --check` | Rust | 格式门禁（零 tolerance） |
+| Step 3 | ci-rust Step 5 | `cargo clippy` | Rust | Lint 门禁（零 warning，排除 aster-ide） |
+| Step 4 | ci-rust Step 6 | `cargo test` | Rust | 单元测试 + 集成测试（排除 aster-ide） |
+| Step 5 | ci-ide Step 5 | `pnpm lint` | IDE | ESLint 门禁 |
+| Step 6 | ci-ide Step 6 | `pnpm typecheck` | IDE | TypeScript 类型检查 |
+| Step 7 | ci-ide Step 7 | `pnpm test` | IDE | Vitest 单元测试 |
+
+**智能跳过**：
+- 仅 Rust 文件变更时，跳过 Step 5-7（IDE 校验）
+- 仅 IDE/前端文件变更时，跳过 Step 1-4（Rust 校验）
+- 无相关文件变更时，直接放行
+
+**环境变量（跳过慢步骤，用于紧急修复提交）**：
+
+| 变量 | 作用 |
+|------|------|
+| `SKIP_CLIPPY=1` | 跳过 `cargo clippy`（通常最慢） |
+| `SKIP_RUST_TESTS=1` | 跳过 `cargo test` |
+| `SKIP_IDE_CHECKS=1` | 跳过所有 IDE/前端校验 |
+| `SKIP_IDE_TESTS=1` | 跳过 `pnpm test` |
+
+使用示例：
+```bash
+# 紧急修复，跳过慢步骤
+SKIP_CLIPPY=1 SKIP_RUST_TESTS=1 git commit -m "fix(renderer): 紧急修复崩溃"
+```
+
+**启用 Hook**（开发者首次克隆后执行）：
+
+```bash
+# 将仓库的 .githooks 目录设置为 Git hook 路径
+git config core.hooksPath .githooks
+```
+
+或在 `.claude/settings.json` 中配置 AI 在首次 `git commit` 前自动执行此命令。
+
+> **注意**：`.githooks/` 目录及其脚本需提交到仓库，确保所有开发者使用相同的 hook。
 
 ---
 
@@ -408,8 +461,8 @@ pub enum SceneNode {
     /// - voice_id: 可选的语音文件资源 ID
     Dialogue {
         speaker: String,
-        text: String,
-        voice_id: Option<AssetId>,
+        text: Expr,
+        voice_id: Option<Expr>,
     },
 
     /// 菜单/选择支节点：显示一组选项并等待玩家选择
@@ -417,6 +470,15 @@ pub enum SceneNode {
     /// - 当 choices 为空时，此为脚本错误
     Menu {
         choices: Vec<Choice>,
+    },
+
+    /// 子例程定义节点：`sub "name" { body }`，
+    /// 仅在被 `name()` 函数式调用时执行，主流程自动跳过。
+    /// - name: 子例程名（唯一标识，`name()` 调用的目标）
+    /// - body: 子例程体内的 SceneNode 列表
+    Subroutine {
+        name: String,
+        body: Vec<SceneNode>,
     },
     // ...
 }

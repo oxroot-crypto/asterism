@@ -82,13 +82,14 @@ Crates:      └─ 5 crates ─┘├─ +3 ──┤                          
 | **涉及的 Crate** | `aster-platform`, `aster-core`, `aster-parser`, `aster-compiler`, `aster-vm`, `aster-renderer`(basic), `aster-runtime`(basic) |
 | **覆盖的 P0 需求** | REQ-ENG-001~003, REQ-ENG-010~014, REQ-ENG-020~023 |
 | **明确不包含** | 音频、存档/读档、资源缓存、IDE 任何功能 |
+| **预估总工时** | 162h（原 144h + 游戏级集成 18h） |
 
 ### 3.2 任务 — 基础设施与类型系统（Week 3-4）
 
 | 编号 | 任务 | 对应模块 | 对应需求 | 预估 | 交付物 | 验收标准 |
 |------|------|---------|---------|------|--------|---------|
 | T1-001 | 实现 `aster-platform` | `aster-platform` | NFR-COMPAT-001~003 | 8h | `Platform` trait + 3 平台实现 + 单元测试 | 三个平台均能正确返回用户目录和存档路径 |
-| T1-002 | 实现 `aster-core` 所有类型 | `aster-core` | REQ-ENG-003 | 12h | Project / Character / Scene / SceneNode / Asset / SaveData / Theme 等所有核心类型 + serde 派生 | 所有类型可序列化/反序列化，单元测试覆盖 |
+| T1-002 | 实现 `aster-core` 所有类型 | `aster-core` | REQ-ENG-003 | 12h | Game / Character / Scene / SceneNode(26 变体含 Subroutine) / Asset / SaveData / Theme 等所有核心类型 + serde 派生 | 所有类型可序列化/反序列化，单元测试覆盖 |
 | T1-003 | 实现 `aster-parser` — PEG 语法 + AST | `aster-parser` | REQ-ENG-001 | 16h | .aster PEG 语法文件 + AST 构建器 + 错误收集器 + 单元测试 | 有效脚本→AST、无效脚本→含行号的错误信息 |
 
 ### 3.3 任务 — 渲染管线（Week 4-7）
@@ -109,18 +110,31 @@ Crates:      └─ 5 crates ─┘├─ +3 ──┤                          
 | T1-021 | 实现 `aster-vm` 核心 | `aster-vm` | REQ-ENG-002, 003 | 16h | 寄存器 VM，token-threaded dispatch，全部操作码，VmAction 回调 | 所有字节码指令正确执行 |
 | T1-022 | VM 变量/旗标/跳转 | `aster-vm` | REQ-ENG-003, 023 | 8h | VariableStore / FlagSet 操作，条件/无条件跳转，子例程调用 | `if/elif/else` 分支正确，`jump` 到目标标签 |
 
-### 3.5 任务 — 运行时集成（Week 8-10）
+### 3.5 任务 — 游戏级集成（Week 7-8）
+
+> 将单场景管线升级为完整游戏管线：加载 `aster.toml` / `.asterchar` / `build.toml`，批量编译所有场景，解析跨场景引用，提供游戏级上下文供 SceneManager 消费。
 
 | 编号 | 任务 | 对应模块 | 对应需求 | 预估 | 交付物 | 验收标准 |
 |------|------|---------|---------|------|--------|---------|
-| T1-050 | 实现 SceneManager | `aster-runtime` | REQ-ENG-020~023 | 12h | 场景状态机，VM Action→Renderer 命令转换（音频/存档命令预留桩函数，记录 warn 日志而非崩溃） | 完整场景从加载到结束可运行 |
+| T1-023 | 实现游戏清单加载 | `aster-runtime` | REQ-ENG-003, 023 | 6h | `GameLoader` — 解析 `aster.toml` / `build.toml` / `.asterchar` 文件，扫描 `scripts/` 目录发现场景，组装 `GameManifest` | 完整加载模板游戏（2 角色 + 2 场景），入口场景正确标记 |
+| T1-024 | 实现游戏编译器 | `aster-compiler` | REQ-ENG-002, 023 | 8h | `GameCompiler` — 批量编译全部 `.aster` 场景，跨场景 `goto` 引用验证，应用 `build.toml` 编译配置（optimize/minify），生成 `CompiledGame` | 全部场景编译成功，跨场景跳转目标验证通过，优化开关生效 |
+| T1-025 | 实现游戏上下文 | `aster-runtime` | REQ-ENG-023 | 4h | `GameContext` — 持有 `CompiledGame` + 角色表 + 游戏配置，提供场景查询/角色查询/立绘路径解析（按约定路径），供 SceneManager 使用 | 场景/角色查询正确，立绘路径按 `assets/sprites/{id}/{emotion}.png` 解析 |
+
+### 3.6 任务 — 运行时集成（Week 8-10）
+
+| 编号 | 任务 | 对应模块 | 对应需求 | 预估 | 交付物 | 验收标准 |
+|------|------|---------|---------|------|--------|---------|
+| T1-050 | 实现 SceneManager | `aster-runtime` | REQ-ENG-020~023 | 12h | 场景状态机，持有 `GameContext`，VM Action→Renderer 命令转换（通过角色 ID 解析立绘路径），跨场景 `goto` 导航（音频/存档命令预留桩函数，记录 warn 日志而非崩溃） | 完整场景从加载到结束可运行，跨场景跳转后变量保持 |
 | T1-051 | 实现 DialogueController | `aster-runtime` | REQ-ENG-020~021 | 6h | 对话流管理，打字机状态控制，文本缓冲队列 | 对话推进正确，打字机等待→点击→完成流程无 bug |
 | T1-052 | 实现 InputManager | `aster-runtime` | REQ-ENG-020~021 | 4h | winit 事件→游戏动作映射（Enter/Space/Click 推进，Esc 预留） | 鼠标和键盘推进行为一致，无重复触发 |
-| T1-053 | 主事件循环 | `aster-runtime` | — | 8h | 帧循环（60fps），update→render→present 管线，窗口 resize/最小化处理 | 稳定 60fps，窗口 resize 正确重分配 swapchain |
+| T1-053 | 主事件循环 | `aster-runtime` | — | 8h | `App::open(project_root)` — 加载项目→编译→初始化子系统→启动帧循环（60fps），update→render→present 管线，窗口 resize/最小化处理 | 稳定 60fps，窗口 resize 正确重分配 swapchain，`aster-runtime --project /path/to/project` 可运行 |
 
 **Phase 1 产出物检查**：
 - [ ] `aster-platform`、`aster-core`、`aster-parser`、`aster-compiler`、`aster-vm` 单元测试通过
+- [ ] `GameLoader` 正确加载模板游戏（aster.toml + 2 .asterchar + 2 .aster 场景）
+- [ ] `GameCompiler` 批量编译全部场景，跨场景引用验证正确
 - [ ] 加载一个包含 bg + 1 角色 + 5 句对话 + 1 个选择支的 .aster 脚本，可完整播放
+- [ ] 跨场景 `goto` 正确导航，变量/旗标在场景切换后保持
 - [ ] 1080p 下稳定 60fps（基础渲染，无后处理）
 - [ ] CJK 文本渲染无乱码
 - [ ] 打字机效果流畅，点击跳过正常

@@ -37,6 +37,20 @@ authors = ["Asterism Contributors"]
 # 统一依赖版本管理 — 所有 crate 通过 workspace = true 引用
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
+aster-core = { path = "engine/aster-core" }
+aster-parser = { path = "engine/aster-parser" }
+aster-compiler = { path = "engine/aster-compiler" }
+aster-vm = { path = "engine/aster-vm" }
+aster-renderer = { path = "engine/aster-renderer" }
+
+# 引擎与 IDE 通用依赖
+thiserror = "2"
+bincode = "1.3"
+wgpu = "24.0.5"
+winit = "0.30.13"
+pollster = "0.4"
+image = "0.25"
+bytemuck = { version = "1", features = ["derive"] }
 
 # ============================================================
 # 编译配置文件

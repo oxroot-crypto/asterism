@@ -6,26 +6,58 @@
 //!           对外暴露 `AsterRuntime` 作为引擎的唯一入口点。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-12
-//! 最后修改：2026-06-12
+//! 最后修改：2026-06-15
 //!
 //! 依赖模块：
-//! - 集成所有 engine crate（待 Phase 3 添加）
-//! - aster-platform/aster-core/aster-renderer/aster-audio/aster-vm/aster-ui/aster-save
-//! - anyhow（待 Phase 3 添加）：错误传播
+//! - aster-core（核心数据类型：Game / Character / BuildConfig / Scene 等）
+//! - aster-compiler（编译产物：CompiledGame / CompiledScene）
+//! - aster-vm（字节码虚拟机：Vm / VmAction / EngineCommand）
+//! - aster-platform / aster-renderer / aster-audio / aster-ui / aster-save（待后续 Phase 集成）
 //!
 //! 架构位置：依赖所有下层 crate（Architecture.md §4 分层图的顶层）
+//!
+//! ## 模块概览
+//!
+//! | 模块 | 文件 | 说明 |
+//! |------|------|------|
+//! | `error` | `error.rs` | 运行时错误类型：`RuntimeError`（IO/TOML/场景/状态错误） |
+//! | `game_context` | `game_context.rs` | 游戏上下文：`GameContext` — 持有 CompiledGame + 角色表 + 跨场景导航 |
+//! | `game_loader` | `game_loader.rs` | 游戏清单加载器：`GameLoader::load()` → `GameManifest` |
+//! | `game_manifest` | `game_manifest.rs` | 游戏清单类型：`GameManifest` / `SceneEntry` |
+//! | `command_bridge` | `command_bridge.rs` | 命令桥接器：`CommandBridge` — EngineCommand→Renderer trait 映射 |
+//! | `scene_manager` | `scene_manager.rs` | 场景管理器：`SceneManager` — 场景状态机 + VM Action 分发 |
+//!
+//! | `app` | `app.rs` | 引擎顶层入口：`App` — 持有所有子系统，提供 `open()` + 帧循环 |
+//! | `event_loop` | `event_loop.rs` | 事件循环处理器：`EventLoop` — winit ApplicationHandler 实现 |
+//!
+//! ## 已完成的后续任务
+//!
+//! - ~~**PH1-T19**：`DialogueController` — 对话流管理 + 打字机状态控制~~ ✅ 已完成
+//! - ~~**PH1-T20**：`InputManager` — winit 事件→游戏动作映射~~ ✅ 已完成
+//! - ~~**PH1-T21**：主事件循环 + App 项目入口~~ ✅ 已完成
 
-/// 运行时集成 — 待 Phase 3 实现
-///
-/// 将定义：
-/// - `AsterRuntime`：引擎运行时主结构
-/// - `Config`：运行时配置（分辨率/帧率/音量/语言）
-/// - `run(config: &Config) -> anyhow::Result<()>`：启动游戏主循环
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        // Phase 0 占位测试，Phase 3 实际开发时替换为运行时集成测试
-        assert_eq!(2 + 2, 4);
-    }
-}
+// 模块声明
+pub mod app;
+pub mod command_bridge;
+pub mod dialogue_controller;
+pub mod error;
+pub mod event_loop;
+pub mod game_context;
+pub mod game_loader;
+pub mod game_manifest;
+pub mod input_manager;
+pub mod renderer_impl;
+pub mod scene_manager;
+
+// 重导出所有公开类型，方便外部 crate 通过 `aster_runtime::TypeName` 直接引用
+pub use app::App;
+pub use command_bridge::{MockRenderer, Renderer, dispatch};
+pub use dialogue_controller::{DialogueAction, DialogueController, DialogueLine, DialogueState};
+pub use error::RuntimeError;
+pub use event_loop::EventLoop as AppEventLoop;
+pub use game_context::GameContext;
+pub use game_loader::GameLoader;
+pub use game_manifest::{GameManifest, SceneEntry};
+pub use input_manager::{GameAction, InputManager};
+pub use renderer_impl::GameRenderer;
+pub use scene_manager::{SceneManager, SceneState};

@@ -1,0 +1,24 @@
+# akane.asterchar — 示例角色定义（小茜）
+# 文件格式：TOML
+# 资源查找约定：assets/sprites/akane/<表情>.png、assets/voices/akane/<编号>.ogg
+# 创建日期：2026-06-13
+
+[character]
+id = "akane"
+name = "小茜"
+display_color = "#FF8A65"
+description = "活泼开朗的同班同学，行动力超强的元气少女。"
+birthday = "07-14"
+default_position = "right"
+
+[character.sprites]
+default = "default.png"
+happy = "happy.png"
+angry = "angry.png"
+embarrassed = "embarrassed.png"
+surprise = "surprise.png"
+wink = "wink.png"
+laugh = "laugh.png"
+
+[character.voice]
+volume = 1.0

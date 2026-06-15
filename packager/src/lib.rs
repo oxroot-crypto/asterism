@@ -84,7 +84,7 @@ pub enum Commands {
     /// 创建新项目骨架
     ///
     /// 从内置模板生成标准项目目录结构，包含：
-    /// - project.toml（项目元数据）
+    /// - aster.toml（游戏元数据）
     /// - scripts/prologue.aster（示例场景）
     /// - characters/（角色定义目录）
     /// - assets/、gui/、fonts/ 等资源目录

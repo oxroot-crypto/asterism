@@ -158,36 +158,104 @@ graph TB
 | **VM** | 基于 token-threaded dispatch（computed goto），寄存器式 |
 | **文件扩展名** | `.aster`（源码） / `.asterbyte`（编译后） |
 
-**.aster DSL 语法示例**：
+**.aster DSL 语法示例**（完整参考见 `templates/default_project/scripts/prologue.aster`，覆盖全部 25 个 SceneNode 变体 + Expr 插值）：
 
 ```aster
--- 这是注释
+-- .aster DSL 语法示例 — 涵盖 SceneNode 25 变体的核心用法
+-- 注释以 -- 开头，缩进敏感（2 空格），字符串用双引号
+-- 变量以 $ 为前缀，旗标以 % 为前缀
+
 scene "chapter1/prologue" {
     description: "序章 - 相遇"
 
-    bg "bg_school_courtyard"
-    music "bgm_daily_life" fade_in: 2.0
+    -- === 背景与音效 ===
+    bg "bg_school_courtyard"                -- Bg: 设置背景
+    music "bgm_daily_life" fade_in: 2.0     -- Music: 播放 BGM（默认循环）
+    se "se_birds_chirping"                  -- PlaySE: 播放音效（不阻断执行）
 
-    show sayori at center with fade(0.5)
+    -- === 角色登场 ===
+    show sayori at center with fade(0.5)    -- ShowChar: 显示角色立绘（预设位置 left/center/right）
+    show akane at right emotion: "happy" with dissolve(0.5)
 
-    sayori "今天天气真好啊。"
-    show sayori emotion: "smile" with dissolve(0.3)
-    sayori "要不要一起去散步？"
+    -- === 对话与旁白 ===
+    sayori "今天天气真好啊。"               -- Dialogue: 角色对话（暂停等待点击）
+    sayori "这句话有配音哦。" voice: "0001"  -- 带语音的对话（引擎自动从 assets/voices/sayori/0001.ogg 加载）
 
-    menu "去哪里？" {
+    narration "那是樱花盛开的四月。"         -- Narration: 旁白（无说话者，居中/斜体样式）
+
+    -- === 表情切换 ===
+    show sayori emotion: "smile" with dissolve(0.3)  -- Emotion: 原地切换立绘表情
+
+    -- === 角色移动 ===
+    move sayori to left with slide(left, 0.8)        -- MoveChar: 将已显示角色移动到新位置
+    move akane to center emotion: "surprise" with slide(right, 0.8)
+
+    -- === 精灵（道具/贴纸） ===
+    sprite "ui/icon_heart.png" at (0.9, 0.05) scale: 0.5 alpha: 0.8  -- ShowSprite: 显示独立精灵
+    hide sprite "ui/icon_heart.png" with fade(0.3)                    -- HideSprite: 隐藏精灵
+
+    -- === 效果与等待 ===
+    effect "shake" intensity: 0.8 duration: 500   -- Effect: 屏幕震动
+    wait 800                                       -- Wait: 暂停 800ms
+
+    -- === 变量与旗标 ===
+    $affection_sayori = 2                          -- SetVariable: 变量赋值
+    $affection_sayori = $affection_sayori + 1      -- 表达式赋值
+    set %met_akane                                  -- SetFlag: 旗标设为 true
+    unset %bad_end_warning                          -- UnsetFlag: 旗标设为 false
+    toggle %auto_mode                               -- ToggleFlag: 翻转旗标
+
+    -- === 条件分支 ===
+    if $affection_sayori >= 3 {                     -- Branch: if/elif/else
+        sayori emotion: "happy"
+        sayori "看来我们的羁绊已经很深了呢。"
+    } elif $affection_sayori >= 1 {
+        sayori "以后请多指教。"
+    } else {
+        sayori "……初次见面。"
+    }
+
+    -- === 旗标条件 ===
+    if %met_akane {
+        narration "小茜也在这里。"
+    }
+
+    -- === 隐藏角色 ===
+    hide akane with fade(0.5)                       -- HideChar: 移除角色立绘
+
+    -- === 标签与跳转 ===
+    label "branch_point"                            -- Label: 跳转目标（自身无副作用）
+    jump "branch_point"                             -- Jump: 场景内无条件跳转到标签
+
+    -- === 子例程调用 ===
+    flashback()                                     -- 函数式调用: 压栈并跳转到子例程
+    -- ... 回到这里继续 ...
+
+    sub "flashback" {                               -- 子例程定义（仅 name() 可调用）
+        bg "bg_memory" with dissolve(0.8)
+        music "bgm_memory" fade_in: 1.0
+        narration "【闪回】那是很多年前的约定。"
+    }
+
+    -- === 选择支 ===
+    label "menu_scene"
+    menu "要去哪里？" {                              -- Menu: 选择支（等待玩家选择）
         "樱花大道" {
             $route_sakura = true
-            jump "chapter1/sakura_road"
+            goto "chapter1/sakura_road"             -- Goto: 跨场景跳转
         }
         "图书馆" {
             $route_library = true
-            jump "chapter1/library"
+            goto "chapter1/library"
         }
-        "哪里都不去" if $affection_sayori >= 3 {
-            sayori "诶——好冷淡..."
-            jump "chapter1/stay"
+        "秘密路线" if $affection_sayori >= 5 {       -- 条件选项（不满足时灰色/隐藏）
+            $unlocked_secret = true
+            goto "chapter1/secret"
         }
     }
+
+    -- === 停止音乐 ===
+    stop_music fade_out: 1.5                         -- StopMusic: 停止 BGM（可选淡出）
 }
 ```
 
@@ -403,15 +471,19 @@ pub trait Platform: Send + Sync {
 
 | 类型 | 说明 | 关键字段 |
 |------|------|---------|
-| `Project` | 游戏项目元数据 | name, version, resolution, entry_scene, characters, scenes, settings |
-| `Character` | 角色定义 | id, name, display_color, sprites: Map<Emotion, AssetId>, voice_prefix |
-| `Scene` | 场景定义 | id, label, background, music, nodes: Vec<SceneNode> |
-| `SceneNode` | 场景节点枚举 | Dialogue / ShowChar / HideChar / Narration / Menu / Branch / SetVariable / PlaySE / Wait / Effect / Call / Return / Label |
+| `Game` | 游戏项目元数据 | name, version, resolution, entry_scene, characters, scenes, settings |
+| `Character` | 角色定义 | id, name, display_color, description?, birthday?, default_position, sprites: Map\<Emotion, AssetId\>, voice?: VoiceConfig |
+| `VoiceConfig` | 语音配置 | volume: f32（0.0~1.0，默认 1.0） |
+| `Scene` | 场景定义 | id, label, background: Option\<Expr\>, music: Option\<Expr\>, nodes: Vec\<SceneNode\> |
+| `SceneNode` | 场景节点枚举（25 变体） | 所有动态字段（资产路径、文本、数值参数、跳转目标等）统一使用 `Expr` 类型；仅编译期常量（标签名、旗标名、变量名、特效类型标识）保持 `String` |
 | `AssetId` | 资源标识符 | newtype u64，按类型分段分配 |
 | `Asset` | 资源元数据 | id, asset_type: AssetType, path, metadata |
 | `AssetType` | 资源类型枚举 | Background / CharacterSprite / Bgm / Se / Voice / Font / Video / GuiElement |
 | `VariableStore` | 变量存储 | HashMap<String, Value>，Value 为 Int / Float / String / Bool / Array / Map |
 | `FlagSet` | 旗标集合 | HashSet<String> |
+| `Expr` | 表达式 AST 节点 | 7 变体：StringLiteral / IntLiteral / FloatLiteral / BoolLiteral / Variable / BinaryOp(Box\<Expr\>, BinaryOp, Box\<Expr\>) / UnaryOp(UnaryOp, Box\<Expr\>) |
+| `BinaryOp` | 二元运算符枚举 | 12 种：算术(Add/Sub/Mul/Div) 比较(Eq/Neq/Lt/Gt/Le/Ge) 逻辑(And/Or) |
+| `UnaryOp` | 一元运算符枚举 | 2 种：Not / Neg |
 | `SaveData` | 存档数据结构 | slot, timestamp, thumbnail, scene_id, vm_snapshot, variable_store, flags, audio_state, render_state |
 | `Theme` | 主题配置 | 完整映射 theme.toml 所有字段的结构体 |
 
@@ -419,15 +491,19 @@ pub trait Platform: Send + Sync {
 
 | 属性 | 说明 |
 |------|------|
-| **职责** | 将 `.aster` 源码解析为 AST（抽象语法树） |
+| **职责** | 将 `.aster` 源码解析为 `aster_core::Scene` |
 | **依赖** | `aster-core`、pest |
 | **输入** | `.aster` 文件内容（&str） |
-| **输出** | `Result<ParsedScene, Vec<ParseError>>` |
+| **输出** | `Result<aster_core::Scene, Vec<ParseError>>` |
 | **对应需求** | REQ-ENG-001（DSL 脚本解析）、REQ-DSL-001~003 |
 
 ```
 解析流程：
-.aster 源码 → pest::Parser (PEG 语法) → PestToken 流 → AST Builder → ParsedScene
+.aster 源码 → pest::Parser (PEG 语法) → PestToken 流 → AST Builder → aster_core::Scene
+
+架构原则：aster-parser 不定义自己的 AST 类型。直接复用 aster-core 中已有的
+Scene / SceneNode（25 变体）/ Position / Choice / TransitionSpec / Expr / BinaryOp / UnaryOp 等类型，
+避免类型层重复。
 
 ParseError 包含：
 - location: (line, column, offset)
@@ -442,7 +518,7 @@ ParseError 包含：
 |------|------|
 | **职责** | AST → 中间表示（IR）→ 字节码，包含优化 Pass |
 | **依赖** | `aster-core`、`aster-parser`、bincode |
-| **输入** | `ParsedScene` |
+| **输入** | `aster_core::Scene` |
 | **输出** | `Result<CompiledScene, Vec<CompileError>>` |
 | **对应需求** | REQ-ENG-002（字节码编译） |
 
@@ -742,11 +818,11 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
-    Project ||--o{ Character : "defines"
-    Project ||--o{ Scene : "contains"
-    Project ||--o{ Asset : "references"
-    Project ||--o{ Theme : "configures"
-    Project ||--|| ProjectSettings : "has"
+    Game ||--o{ Character : "defines"
+    Game ||--o{ Scene : "contains"
+    Game ||--o{ Asset : "references"
+    Game ||--o{ Theme : "configures"
+    Game ||--|| GameSettings : "has"
 
     Character ||--o{ Asset : "sprites reference"
     Scene ||--o{ SceneNode : "composed of"
@@ -761,7 +837,7 @@ erDiagram
     Theme ||--o{ FontConfig : "declares"
     Theme ||--o{ WidgetStyle : "defines"
 
-    Project {
+    Game {
         string name
         string version
         int_array resolution
@@ -773,8 +849,15 @@ erDiagram
         string id
         string name
         string display_color
+        string? description
+        string? birthday
+        string default_position "'left' | 'center' | 'right'"
         map emotion_to_asset_id "Map<Emotion, AssetId>"
-        string voice_prefix
+        VoiceConfig? voice
+    }
+
+    VoiceConfig {
+        float volume "0.0~1.0, 默认 1.0"
     }
 
     Scene {
@@ -786,7 +869,7 @@ erDiagram
     }
 
     SceneNode {
-        enum type "Dialogue|ShowChar|HideChar|Narration|Menu|Branch|SetVariable|PlaySE|Wait|Effect|Call|Label"
+        enum type "Bg|ShowChar|ShowSprite|MoveChar|Emotion|HideChar|HideSprite|Dialogue|Narration|Menu|Branch|SetVariable|SetFlag|UnsetFlag|ToggleFlag|Music|StopMusic|PlaySE|Wait|Effect|Jump|Goto|Call|Return|Label|Subroutine"
         json properties
     }
 
@@ -824,24 +907,30 @@ erDiagram
 
 ```
 my_galgame/                              # 项目根目录
-├── project.toml                         # 项目元数据 (TOML)
-├── theme.toml                           # UI 主题配置 (TOML)
+├── aster.toml                         # 项目元数据 (TOML)
+├── build.toml                           # 构建配置 (TOML)
+├── .asterignore                         # 构建排除规则
 │
 ├── scripts/                             # .aster 脚本源码
-│   ├── prologue.aster
-│   ├── chapter_*.aster
-│   └── common.aster
+│   ├── prologue.aster                   #   序章（SceneNode 25 变体 + Expr 插值完整参考）
+│   ├── chapter1/                        #   章节目录
+│   │   └── sakura_road.aster            #   第一章·樱花大道（多场景/子例程/旗标）
+│   └── common.aster                     #   公共场景/宏定义
 │
 ├── characters/                          # 角色定义
-│   ├── heroine_a.asterchar
-│   └── heroine_b.asterchar
+│   ├── heroine.asterchar                #   小百合（sayori）
+│   └── akane.asterchar                  #   小茜（akane）
 │
 ├── assets/                              # 原始游戏资源
-│   ├── sprites/                         # 角色立绘
+│   ├── sprites/                         # 角色立绘（按角色 ID 目录组织）
+│   │   ├── sayori/                      #   小百合立绘（default.png / smile.png …）
+│   │   └── akane/                       #   小茜立绘
 │   ├── backgrounds/                     # 场景背景
 │   ├── bgm/                             # 背景音乐 (OGG)
 │   ├── se/                              # 音效 (WAV/OGG)
-│   ├── voices/                          # 语音 (OGG)
+│   ├── voices/                          # 语音（按角色 ID 目录组织）
+│   │   ├── sayori/                      #   小百合语音（0001.ogg / 0002.ogg …）
+│   │   └── akane/                       #   小茜语音
 │   ├── video/                           # 视频 (WebM) — v1.0.0
 │   └── live2d/                          # Live2D 模型 — v1.0.0
 │
@@ -864,13 +953,13 @@ my_galgame/                              # 项目根目录
     └── thumbnails/                      # 生成的缩略图
 ```
 
-**`project.toml` 项目元数据文件格式**（TOML）：
+**`aster.toml` 项目元数据文件格式**（TOML）：
 
 ```toml
-# project.toml — 游戏项目元数据
-# 对应类型：aster_core::Project
+# aster.toml — 游戏项目元数据
+# 对应类型：aster_core::Game
 
-[project]
+[game]
 # 项目名称（显示在窗口标题和关于对话框中）
 name = "My First Visual Novel"
 # 语义化版本号
@@ -878,12 +967,12 @@ version = "0.1.0"
 # 入口场景 ID（对应 scripts/ 下的 .aster 文件名，不含扩展名）
 entry_scene = "prologue"
 
-[project.resolution]
+[game.resolution]
 # 游戏设计分辨率（逻辑像素，引擎自动适配实际窗口大小）
 width = 1920
 height = 1080
 
-[project.settings]
+[game.settings]
 # 默认语言（ISO 639-1 代码，多语言支持 — v1.0.0）
 language = "zh-CN"
 # 默认文字显示速度（instant / slow / normal / fast）
@@ -896,26 +985,37 @@ default_se_volume = 1.0
 default_voice_volume = 1.0
 ```
 
-> `characters` 和 `scenes` 字段由引擎在加载时从 `characters/` 和 `scripts/` 目录自动发现，无需在 `project.toml` 中手动列出。
+> `characters` 和 `scenes` 字段由引擎在加载时从 `characters/` 和 `scripts/` 目录自动发现，无需在 `aster.toml` 中手动列出。
 
 **`.asterchar` 角色定义文件格式**（TOML）：
 
 ```toml
-# characters/heroine_a.asterchar
+# characters/heroine.asterchar — 角色定义文件
+# 文件名（不含扩展名）即角色 ID，脚本中通过此 ID 引用
+# 资源按角色 ID 目录组织，无需前缀：
+#   立绘：assets/sprites/<角色id>/<表情>.png
+#   语音：assets/voices/<角色id>/<编号>.ogg
 [character]
 id = "sayori"
 name = "小百合"
 display_color = "#F8BBD0"
+description = "温柔内向的青梅竹马，喜欢樱花和文学。"
+birthday = "03-21"
+default_position = "center"
 
+# 立绘变体 — key 为表情名，value 为文件名（引擎自动拼接角色目录）
 [character.sprites]
-default = "sayori_default.png"
-smile = "sayori_smile.png"
-angry = "sayori_angry.png"
-embarrassed = "sayori_embarrassed.png"
-surprise = "sayori_surprise.png"
+default = "default.png"
+smile = "smile.png"
+angry = "angry.png"
+embarrassed = "embarrassed.png"
+surprise = "surprise.png"
+sad = "sad.png"
+happy = "happy.png"
 
+# 语音配置 — 引擎按 assets/voices/<角色id>/<编号>.ogg 自动加载
 [character.voice]
-prefix = "sayori"        # 语音文件前缀，如 sayori_0001.ogg
+volume = 0.9
 ```
 
 > `.asterchar` 文件为 TOML 格式，`aster-parser` 提供 `parse_character_file()` 函数解析。角色定义可分散在多个文件中，引擎加载时合并为一个 `Character` 集合。
@@ -1092,7 +1192,7 @@ listen('preview-log', (event) => { /* 预览引擎日志 */ })
 IDE 启动引擎子进程时指定预览模式：
 
 ```bash
-aster-runtime --preview --project /path/to/project --ipc-pipe "aster_preview_pipe"
+aster-runtime --preview --game /path/to/game --ipc-pipe "aster_preview_pipe"
 ```
 
 IPC 通道（Unix domain socket / Windows named pipe）传递 JSON 消息：

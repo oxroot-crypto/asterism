@@ -6,4 +6,18 @@ license.workspace = true
 description = "运行时集成 — 集成所有子系统，提供统一的游戏启动/运行/配置接口"
 
 [dependencies]
-# Phase 3 将集成所有 engine crate（workspace 内部依赖）
+aster-core = { workspace = true }
+aster-compiler = { workspace = true }
+aster-vm = { workspace = true }
+aster-parser = { workspace = true }
+aster-renderer = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+toml = "0.8"
+thiserror = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+aster-parser = { workspace = true }
+image = { workspace = true }

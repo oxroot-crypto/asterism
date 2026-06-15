@@ -6,4 +6,10 @@ license.workspace = true
 description = ".aster 编译器 — 将 AST 编译为字节码，供 VM 执行"
 
 [dependencies]
-# Phase 1 将添加 aster-core、aster-parser（workspace 内部依赖）
+aster-core.workspace = true
+bincode.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+aster-parser.workspace = true
