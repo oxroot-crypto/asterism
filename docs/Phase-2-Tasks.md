@@ -15,7 +15,7 @@
 |------|----------|--------|----------|------|------|
 | PH2-T01 | aster-audio — BGM 播放系统（crate 初始化 + kira 集成 + 循环/音量） | P0 | 6h | 无 | [x] |
 | PH2-T02 | aster-audio — SE 播放 + 多通道混音（BGM/SE 独立通道） | P0 | 4h | PH2-T01 | [x] |
-| PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [ ] |
+| PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [x] |
 | PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [ ] |
 | PH2-T05 | aster-asset — LRU 缓存策略（淘汰机制 + 命中率统计） | P0 | 4h | PH2-T04 | [ ] |
 | PH2-T06 | aster-save — SaveData 数据结构 + 序列化 + CRC32 完整性校验 | P0 | 6h | 无 | [ ] |
@@ -23,7 +23,7 @@
 | PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 2 | 进行中: 0 | 待开始: 7
+**统计**：总计 9 个任务 | 已完成: 3 | 进行中: 0 | 待开始: 6
 
 ---
 
@@ -352,7 +352,7 @@ graph TD
 | **对应需求** | REQ-ENG-032 — 音频淡入淡出：BGM 和 SE 支持 fade_in/fade_out，时长可配置（秒）；REQ-ENG-040 — 游戏存档：音频状态作为存档数据的一部分 |
 | **对应架构模块** | `aster-audio`（参考 Architecture.md 4.7 节 — 音频系统） |
 | **前置依赖** | PH2-T02（BGM + SE 播放均已实现，独立通道就绪） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -467,34 +467,46 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-15 23:30
+- 实际工时：2.5 小时
+- AI 自验证结果：✅ AC01-AC08 全部通过（31 单元测试 + 17 文档测试）
+- 人工测试结果：✅ MV01/MV02 全部通过
+- 备注：kira 0.12.1 API 差异——fade_in 方法名为 `fade_in_tween()`；start_time 是调度概念而非 seek，seek 使用 `start_position(PlaybackPosition::Seconds)`；stop_bgm_with_fade 返回 `()` 而非 `Result`（停止操作总是成功）。AudioSnapshot 定义在 aster-audio 而非 aster-core，由 PH2-T06 决定是否迁移。
 
 **上下文交接**：
 - 关键决策：
   - fade 基于 kira `Tween` 实现，异步非阻塞——调用线程在发起 fade 后立即返回
-  - BGM 位置恢复通过记录 `position_secs` + 重新播放时设置 `start_time` 实现，精度取决于音频编码格式
-  - AudioSnapshot 使用 String 路径而非 AssetId，因为存档需要在反序列化时自包含、不依赖 AssetManager 的 ID 映射表
+  - kira 0.12.1 的 fade API 为 `StaticSoundData::fade_in_tween(Some(tween))`（非 `fade_in`）
+  - BGM 位置恢复通过 `StaticSoundData::start_position(PlaybackPosition::Seconds(pos))` 实现 seek
+  - `bgm_looping: bool` 和 `bgm_start_time: Option<Instant>` 字段用于追踪 BGM 状态
+  - BGM 播放位置通过 `Instant::now() - bgm_start_time` 计算
+  - AudioSnapshot 使用 String 路径而非 AssetId，确保存档文件自包含
+  - 现有 `play_bgm()`/`stop_bgm()`/`play_se()` 委托到 `_with_fade` 变体，保持向后兼容
+  - `stop_bgm_with_fade()` 返回 `()`（非 `Result`），因为停止操作在 kira 中总是成功
 - 新增接口：
   ```rust
   impl AudioSystem {
       pub fn play_bgm_with_fade(&mut self, asset_path: &str, looping: bool, fade_in: f64) -> Result<(), AudioError>;
-      pub fn stop_bgm_with_fade(&mut self, fade_out: f64) -> Result<(), AudioError>;
+      pub fn stop_bgm_with_fade(&mut self, fade_out: f64);
       pub fn play_se_with_fade(&mut self, asset_path: &str, fade_in: f64) -> Result<(), AudioError>;
       pub fn get_state(&self) -> AudioSnapshot;
       pub fn restore_state(&mut self, snapshot: &AudioSnapshot) -> Result<(), AudioError>;
   }
   
-  #[derive(Debug, Clone, Serialize, Deserialize)]
-  pub struct AudioSnapshot { /* 见实现要点 */ }
+  #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+  pub struct AudioSnapshot {
+      pub current_bgm_path: Option<String>,
+      pub bgm_position_secs: f64,
+      pub bgm_looping: bool,
+      pub bgm_volume: f32,
+      pub se_volume: f32,
+  }
   ```
 - 已知限制：
-  - BGM 位置 seek 在 VBR 编码的 OGG 文件中精度约 ±50ms，对视觉小说存档体验无影响
+  - `StaticSoundData::start_position()` 的 seek 精度在 VBR 编码 OGG 文件中约 ±50ms，对视觉小说存档体验无影响
   - AudioSnapshot 不含 SE 播放队列（SE 是瞬时音效，存档时不应有正在播放的 SE）
-  - restore_state 时音频文件缺失会返回错误，由上层（存档系统）决定是否降级处理
+  - restore_state 时音频文件缺失会返回 `AudioError::AssetNotFound`
+  - AudioSnapshot 当前定义在 `aster-audio` crate，PH2-T06 需决定是否迁移到 `aster-core`
 - 建议下一个任务先读取：`engine/aster-audio/src/snapshot.rs`、`engine/aster-audio/src/audio_system.rs`
 ### PH2-T04 — aster-asset 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码）
 

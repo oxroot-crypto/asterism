@@ -8,5 +8,9 @@ description = "音频系统 — BGM/BGS/SE/Voice 播放、混音、淡入淡出"
 [dependencies]
 aster-core = { workspace = true }
 kira = { workspace = true }
+serde = { workspace = true }
 symphonia = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1"

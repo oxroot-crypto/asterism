@@ -254,6 +254,8 @@ version = "0.1.0"
 dependencies = [
  "aster-core",
  "kira",
+ "serde",
+ "serde_json",
  "symphonia",
  "thiserror 2.0.18",
 ]

@@ -8,7 +8,7 @@
 //!           功能规划：
 //!           - Phase 2-T01 ✅ BGM 播放（当前实现）
 //!           - Phase 2-T02 ✅ SE 音效播放 + 多通道混音（当前实现）
-//!           - Phase 2-T03 🔲 fade_in/fade_out + 音频状态快照
+//!           - Phase 2-T03 ✅ fade_in/fade_out + 音频状态快照（当前实现）
 //!           - Phase 4    🔲 Voice 角色语音通道
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-12
@@ -27,11 +27,14 @@
 //! |------|------|------|
 //! | `audio_system` | `audio_system.rs` | `AudioSystem` 结构体 — BGM/SE 播放/停止/循环/音量控制 |
 //! | `error` | `error.rs` | `AudioError` 枚举 — 资源/解码/播放/IO 四类错误 |
+//! | `snapshot` | `snapshot.rs` | `AudioSnapshot` 结构体 — 音频状态快照，支持序列化/反序列化（PH2-T03） |
 
 // 模块声明
 pub mod audio_system;
 pub mod error;
+pub mod snapshot;
 
 // 重导出公开类型
 pub use audio_system::AudioSystem;
 pub use error::AudioError;
+pub use snapshot::AudioSnapshot;

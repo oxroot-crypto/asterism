@@ -11,10 +11,13 @@
 //! 依赖模块：
 //! - kira（音频引擎后端：AudioManager / TrackBuilder / TrackHandle / StaticSoundData）
 //! - crate::error::AudioError（错误类型）
+//! - crate::snapshot::AudioSnapshot（音频状态快照，PH2-T03）
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::error::AudioError;
+use crate::snapshot::AudioSnapshot;
 
 /// 将振幅比值（0.0 ~ 1.0）转换为分贝值。
 ///
@@ -105,6 +108,10 @@ pub struct AudioSystem {
     bgm_volume: f32,
     /// SE 通道音量（0.0 ~ 1.0），默认 0.8
     se_volume: f32,
+    /// 当前 BGM 是否循环播放（PH2-T03，用于状态快照）
+    bgm_looping: bool,
+    /// BGM 开始播放时刻（PH2-T03，用于计算播放位置）
+    bgm_start_time: Option<Instant>,
 }
 
 impl AudioSystem {
@@ -161,6 +168,9 @@ impl AudioSystem {
             bgm_volume: 0.8,
             // 默认 SE 音量 0.8，与 GameSettings::default_se_volume 一致
             se_volume: 0.8,
+            // PH2-T03: 初始无 BGM 循环，无播放起始时刻
+            bgm_looping: false,
+            bgm_start_time: None,
         })
     }
 
@@ -232,32 +242,8 @@ impl AudioSystem {
     /// # }
     /// ```
     pub fn play_bgm(&mut self, asset_path: &str, looping: bool) -> Result<(), AudioError> {
-        // 如果已有 BGM 播放中，先停止（AC08：BGM 替换）
-        self.stop_bgm();
-
-        // 加载音频文件（BGM/SE 共用解码逻辑）
-        let mut sound_data = Self::load_sound_data(asset_path)?;
-
-        // 设置循环播放
-        if looping {
-            // 使用 kira 原生 loop_region 实现无缝循环
-            // `..` 表示从开始到结束的完整区域（无限循环）
-            sound_data = sound_data.loop_region(..);
-        }
-
-        // 提交播放到 BGM 子轨道，获取句柄
-        let handle = self
-            .bgm_track
-            .play(sound_data)
-            .map_err(|e| AudioError::PlaybackError {
-                reason: format!("无法播放音频 \"{}\"：{}", asset_path, e),
-            })?;
-
-        // 保存播放状态
-        self.bgm_handle = Some(handle);
-        self.current_bgm_path = Some(asset_path.to_string());
-
-        Ok(())
+        // 委托到带 fade 的版本，fade_in=0 表示立即以目标音量播放
+        self.play_bgm_with_fade(asset_path, looping, 0.0)
     }
 
     /// 停止当前播放的背景音乐。
@@ -286,12 +272,8 @@ impl AudioSystem {
     /// # }
     /// ```
     pub fn stop_bgm(&mut self) {
-        if let Some(mut handle) = self.bgm_handle.take() {
-            // 使用默认 Tween（立即停止，无淡出效果）
-            // PH2-T03 将扩展为支持 fade_out 参数
-            handle.stop(kira::Tween::default());
-        }
-        self.current_bgm_path = None;
+        // 委托到带 fade 的版本，fade_out=0 表示立即停止
+        self.stop_bgm_with_fade(0.0);
     }
 
     /// 设置 BGM 通道音量。
@@ -380,17 +362,8 @@ impl AudioSystem {
     /// # }
     /// ```
     pub fn play_se(&mut self, asset_path: &str) -> Result<(), AudioError> {
-        // 加载音频文件（BGM/SE 共用解码逻辑）
-        let sound_data = Self::load_sound_data(asset_path)?;
-
-        // 提交播放到 SE 子轨道（fire-and-forget，不持有句柄）
-        self.se_track
-            .play(sound_data)
-            .map_err(|e| AudioError::PlaybackError {
-                reason: format!("无法播放音效 \"{}\"：{}", asset_path, e),
-            })?;
-
-        Ok(())
+        // 委托到带 fade 的版本，fade_in=0 表示立即以目标音量播放
+        self.play_se_with_fade(asset_path, 0.0)
     }
 
     /// 设置 SE 通道音量。
@@ -461,6 +434,325 @@ impl AudioSystem {
     /// ```
     pub fn is_bgm_playing(&self) -> bool {
         self.bgm_handle.is_some()
+    }
+
+    // ─── PH2-T03: fade 方法 ──────────────────────────────────────────────
+
+    /// 加载并播放背景音乐（BGM），支持淡入效果。
+    ///
+    /// 与 `play_bgm()` 的区别在于支持 `fade_in` 参数控制淡入时长。
+    /// 当 `fade_in` 为 `0.0` 时，行为与 `play_bgm()` 完全一致（立即以目标音量播放）。
+    ///
+    /// # 参数
+    ///
+    /// - `asset_path`：音频文件路径（如 `"assets/bgm/theme.ogg"`）
+    /// - `looping`：是否循环播放
+    /// - `fade_in`：淡入时长（秒）。`0.0` 表示无淡入，立即以目标音量播放
+    ///
+    /// # 错误
+    ///
+    /// - `AudioError::AssetNotFound` — 文件不存在
+    /// - `AudioError::DecodeError` — 解码失败
+    /// - `AudioError::PlaybackError` — kira 播放提交失败
+    ///
+    /// # 实现
+    ///
+    /// 淡入通过 kira 的 `StaticSoundData::fade_in(Tween)` 实现——
+    /// 初始音量为 0，在指定时长内渐变至目标值。kira 内部异步执行，
+    /// 本方法不阻塞调用线程。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// // 2 秒淡入播放
+    /// audio.play_bgm_with_fade("assets/bgm/theme.ogg", true, 2.0)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn play_bgm_with_fade(
+        &mut self,
+        asset_path: &str,
+        looping: bool,
+        fade_in: f64,
+    ) -> Result<(), AudioError> {
+        // 如果已有 BGM 播放中，先停止（AC08：BGM 替换）
+        self.stop_bgm_with_fade(0.0);
+
+        // 加载音频文件（BGM/SE 共用解码逻辑）
+        let mut sound_data = Self::load_sound_data(asset_path)?;
+
+        // 设置循环播放
+        if looping {
+            // 使用 kira 原生 loop_region 实现无缝循环
+            // `..` 表示从开始到结束的完整区域（无限循环）
+            sound_data = sound_data.loop_region(..);
+        }
+
+        // 设置淡入效果
+        if fade_in > 0.0 {
+            let tween = kira::Tween {
+                duration: Duration::from_secs_f64(fade_in),
+                ..Default::default()
+            };
+            sound_data = sound_data.fade_in_tween(Some(tween));
+        }
+
+        // 提交播放到 BGM 子轨道，获取句柄
+        let handle = self
+            .bgm_track
+            .play(sound_data)
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法播放音频 \"{}\"：{}", asset_path, e),
+            })?;
+
+        // 保存播放状态（PH2-T03：新增 looping 和 start_time 追踪）
+        self.bgm_handle = Some(handle);
+        self.current_bgm_path = Some(asset_path.to_string());
+        self.bgm_looping = looping;
+        self.bgm_start_time = Some(Instant::now());
+
+        Ok(())
+    }
+
+    /// 停止当前播放的背景音乐，支持淡出效果。
+    ///
+    /// 与 `stop_bgm()` 的区别在于支持 `fade_out` 参数控制淡出时长。
+    /// 当 `fade_out` 为 `0.0` 时，立即停止（与 `stop_bgm()` 相同）。
+    ///
+    /// # 参数
+    ///
+    /// - `fade_out`：淡出时长（秒）。`0.0` 表示立即停止，无淡出效果
+    ///
+    /// # 淡出实现
+    ///
+    /// 通过 kira 的 `StaticSoundHandle::stop(Tween)` 实现——
+    /// 音量在指定时长内从当前值渐变至 0，完成后自动释放资源。
+    /// 淡出期间不阻塞调用线程（kira 内部异步执行）。
+    ///
+    /// # 无 BGM 时的行为
+    ///
+    /// 如果当前无 BGM 播放，本方法为无操作（no-op），不产生任何效果。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// audio.play_bgm("assets/bgm/theme.ogg", true)?;
+    /// // 1.5 秒淡出停止
+    /// audio.stop_bgm_with_fade(1.5);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn stop_bgm_with_fade(&mut self, fade_out: f64) {
+        if let Some(mut handle) = self.bgm_handle.take() {
+            if fade_out > 0.0 {
+                // 带淡出效果的停止：音量在 fade_out 秒内渐变至 0
+                let tween = kira::Tween {
+                    duration: Duration::from_secs_f64(fade_out),
+                    ..Default::default()
+                };
+                handle.stop(tween);
+            } else {
+                // 立即停止，无淡出效果
+                handle.stop(kira::Tween::default());
+            }
+        }
+        // 清除播放状态
+        self.current_bgm_path = None;
+        self.bgm_looping = false;
+        self.bgm_start_time = None;
+    }
+
+    /// 播放一次性音效（SE），支持淡入效果。
+    ///
+    /// 与 `play_se()` 的区别在于支持 `fade_in` 参数控制淡入时长。
+    /// 当 `fade_in` 为 `0.0` 时，行为与 `play_se()` 完全一致（立即以目标音量播放）。
+    ///
+    /// # 参数
+    ///
+    /// - `asset_path`：音频文件路径（如 `"assets/se/click.wav"`）
+    /// - `fade_in`：淡入时长（秒）。`0.0` 表示无淡入
+    ///
+    /// # 错误
+    ///
+    /// - `AudioError::AssetNotFound` — 文件不存在
+    /// - `AudioError::DecodeError` — 解码失败
+    /// - `AudioError::PlaybackError` — kira 播放提交失败
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// // 0.3 秒淡入播放
+    /// audio.play_se_with_fade("assets/se/click.wav", 0.3)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn play_se_with_fade(&mut self, asset_path: &str, fade_in: f64) -> Result<(), AudioError> {
+        // 加载音频文件（BGM/SE 共用解码逻辑）
+        let mut sound_data = Self::load_sound_data(asset_path)?;
+
+        // 设置淡入效果
+        if fade_in > 0.0 {
+            let tween = kira::Tween {
+                duration: Duration::from_secs_f64(fade_in),
+                ..Default::default()
+            };
+            sound_data = sound_data.fade_in_tween(Some(tween));
+        }
+
+        // 提交播放到 SE 子轨道（fire-and-forget，不持有句柄）
+        self.se_track
+            .play(sound_data)
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法播放音效 \"{}\"：{}", asset_path, e),
+            })?;
+
+        Ok(())
+    }
+
+    // ─── PH2-T03: 音频状态快照 ──────────────────────────────────────────
+
+    /// 捕获当前音频系统的完整运行时状态。
+    ///
+    /// 返回 `AudioSnapshot`，包含：
+    /// - 当前 BGM 路径、播放位置、循环状态
+    /// - BGM/SE 通道音量
+    ///
+    /// 当无 BGM 播放时，`current_bgm_path` 为 `None`，
+    /// `bgm_position_secs` 为 `0.0`，`bgm_looping` 为 `false`。
+    ///
+    /// # BGM 位置计算
+    ///
+    /// 播放位置通过 `Instant::now() - bgm_start_time` 计算得出，
+    /// 精度取决于系统时钟分辨率（通常为微秒级）。此时间可能因音频
+    /// 解码延迟而与实际音频输出位置有微小偏差（±50ms），对存档
+    /// 体验无实质性影响。
+    ///
+    /// # 返回值
+    ///
+    /// `AudioSnapshot` — 当前音频系统的完整状态快照
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// audio.play_bgm("assets/bgm/theme.ogg", true)?;
+    /// // ... 游戏进行中 ...
+    /// let snapshot = audio.get_state();
+    /// println!("BGM 位置: {:.1}s", snapshot.bgm_position_secs);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_state(&self) -> AudioSnapshot {
+        // 计算当前 BGM 播放位置
+        let bgm_position_secs = self
+            .bgm_start_time
+            .map(|start| start.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
+
+        AudioSnapshot {
+            current_bgm_path: self.current_bgm_path.clone(),
+            bgm_position_secs,
+            bgm_looping: self.bgm_looping,
+            bgm_volume: self.bgm_volume,
+            se_volume: self.se_volume,
+        }
+    }
+
+    /// 从快照恢复音频系统状态。
+    ///
+    /// 恢复流程：
+    /// 1. 立即停止当前 BGM（无淡出）
+    /// 2. 恢复 SE 通道音量
+    /// 3. 恢复 BGM 通道音量
+    /// 4. 如果快照中有 BGM 播放：
+    ///    a. 加载音频文件
+    ///    b. 设置循环状态
+    ///    c. 从快照记录的播放位置开始播放（seek）
+    ///    d. 恢复 BGM 音量
+    ///
+    /// # 参数
+    ///
+    /// - `snapshot`：要恢复的音频状态快照
+    ///
+    /// # 错误
+    ///
+    /// - `AudioError::AssetNotFound` — 快照中的音频文件不存在（可能被删除或移动）
+    /// - `AudioError::DecodeError` — 音频文件解码失败
+    /// - `AudioError::PlaybackError` — kira 播放提交失败
+    ///
+    /// # 位置恢复精度
+    ///
+    /// BGM 位置通过 kira 的 `StaticSoundData::start_time()` 实现 seek。
+    /// VBR 编码的 OGG 文件 seek 精度约 ±50ms，对视觉小说存档体验无影响。
+    ///
+    /// # 示例
+    ///
+    /// ```rust,no_run
+    /// # use aster_audio::AudioSystem;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut audio = AudioSystem::new()?;
+    /// audio.play_bgm("assets/bgm/theme.ogg", true)?;
+    /// let snapshot = audio.get_state();
+    /// // ... 后续操作改变了音频状态 ...
+    /// audio.restore_state(&snapshot)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn restore_state(&mut self, snapshot: &AudioSnapshot) -> Result<(), AudioError> {
+        // 步骤1：立即停止当前 BGM（无淡出）
+        self.stop_bgm_with_fade(0.0);
+
+        // 步骤2：恢复 SE 通道音量
+        self.set_se_volume(snapshot.se_volume);
+
+        // 步骤3：如果有 BGM 路径，则恢复 BGM 播放
+        if let Some(ref bgm_path) = snapshot.current_bgm_path {
+            // 步骤3a：加载音频文件
+            let mut sound_data = Self::load_sound_data(bgm_path)?;
+
+            // 步骤3b：设置循环状态
+            if snapshot.bgm_looping {
+                sound_data = sound_data.loop_region(..);
+            }
+
+            // 步骤3c：设置播放起始位置（seek）
+            if snapshot.bgm_position_secs > 0.0 {
+                // 使用 kira 的 start_position 实现 seek
+                // PlaybackPosition::Seconds 设置音频从指定秒数开始播放
+                sound_data = sound_data.start_position(kira::sound::PlaybackPosition::Seconds(
+                    snapshot.bgm_position_secs,
+                ));
+            }
+
+            // 步骤3d：播放 BGM（不带额外淡入，直接以目标音量播放）
+            let handle =
+                self.bgm_track
+                    .play(sound_data)
+                    .map_err(|e| AudioError::PlaybackError {
+                        reason: format!("无法恢复 BGM \"{}\"：{}", bgm_path, e),
+                    })?;
+
+            self.bgm_handle = Some(handle);
+            self.current_bgm_path = Some(bgm_path.clone());
+            self.bgm_looping = snapshot.bgm_looping;
+            self.bgm_start_time = Some(Instant::now());
+        }
+
+        // 步骤4：恢复 BGM 通道音量
+        self.set_bgm_volume(snapshot.bgm_volume);
+
+        Ok(())
     }
 }
 
@@ -1101,5 +1393,416 @@ mod tests {
             let s = format!("{}", err);
             assert!(!s.is_empty(), "错误消息不应为空");
         }
+    }
+
+    // ─── PH2-T03: fade + 音频状态快照 测试 ───────────────────────────────
+
+    /// AC01 — BGM fade_in 生效。
+    ///
+    /// 验证 `play_bgm_with_fade` 返回 Ok，BGM 句柄为 Some，
+    /// 且 BGM 在 fade 期间处于播放状态。
+    #[test]
+    fn ac01_bgm_fade_in() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac01");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("bgm_fade_in.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        let result = audio.play_bgm_with_fade(wav_path.to_str().unwrap(), true, 2.0);
+        assert!(
+            result.is_ok(),
+            "带 fade_in 的 BGM 播放应返回 Ok，实际: {:?}",
+            result
+        );
+        assert!(audio.is_bgm_playing(), "fade 期间 BGM 应处于播放状态");
+        assert!(
+            audio.bgm_looping,
+            "BGM 应记录为循环模式（bgm_looping=true）"
+        );
+        assert!(audio.bgm_start_time.is_some(), "BGM 播放起始时间应已记录");
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC02 — BGM fade_out 生效。
+    ///
+    /// 验证 `stop_bgm_with_fade` 后：
+    /// 1. bgm_handle 为 None
+    /// 2. is_bgm_playing() 返回 false
+    /// 3. 播放状态被清除
+    #[test]
+    fn ac02_bgm_fade_out() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac02");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("bgm_fade_out.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 先播放 BGM
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), false)
+            .expect("play_bgm 应成功");
+        assert!(audio.is_bgm_playing(), "应处于播放状态");
+
+        // 带淡出停止
+        audio.stop_bgm_with_fade(1.5);
+        assert!(!audio.is_bgm_playing(), "淡出后应不在播放状态");
+        assert!(audio.current_bgm_path.is_none(), "BGM 路径应已清除");
+        assert!(!audio.bgm_looping, "循环标记应已清除");
+        assert!(audio.bgm_start_time.is_none(), "播放起始时间应已清除");
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC03 — SE fade_in 生效。
+    ///
+    /// 验证 `play_se_with_fade` 返回 Ok，不 panic。
+    #[test]
+    fn ac03_se_fade_in() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac03");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("se_fade_in.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        let result = audio.play_se_with_fade(wav_path.to_str().unwrap(), 0.5);
+        assert!(
+            result.is_ok(),
+            "带 fade_in 的 SE 播放应返回 Ok，实际: {:?}",
+            result
+        );
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC04 — fade_in 时长为 0 立即播放。
+    ///
+    /// 验证 `play_bgm_with_fade(fade_in: 0.0)` 与 `play_bgm()` 行为一致，
+    /// 立即以目标音量播放。
+    #[test]
+    fn ac04_zero_fade_immediate() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac04");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("zero_fade.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // fade_in=0.0 应立即播放
+        let result = audio.play_bgm_with_fade(wav_path.to_str().unwrap(), false, 0.0);
+        assert!(result.is_ok(), "fade_in=0.0 应返回 Ok，实际: {:?}", result);
+        assert!(audio.is_bgm_playing(), "fade_in=0.0 应立即处于播放状态");
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC05 — AudioSnapshot 序列化/反序列化往返。
+    ///
+    /// 验证 get_state → serde_json::to_string → serde_json::from_str
+    /// 往返后所有字段值一致。
+    #[test]
+    fn ac05_snapshot_roundtrip() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac05");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("snap_roundtrip.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 设置非默认状态
+        audio.set_bgm_volume(0.7);
+        audio.set_se_volume(0.3);
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), true)
+            .expect("play_bgm 应成功");
+
+        // 捕获状态
+        let snapshot = audio.get_state();
+
+        // 序列化 ↔ 反序列化
+        let json = serde_json::to_string(&snapshot).expect("序列化应成功");
+        let restored: AudioSnapshot = serde_json::from_str(&json).expect("反序列化应成功");
+
+        assert_eq!(
+            snapshot.current_bgm_path, restored.current_bgm_path,
+            "BGM 路径应一致"
+        );
+        assert!(
+            (snapshot.bgm_volume - restored.bgm_volume).abs() < f32::EPSILON,
+            "BGM 音量应一致"
+        );
+        assert!(
+            (snapshot.se_volume - restored.se_volume).abs() < f32::EPSILON,
+            "SE 音量应一致"
+        );
+        assert_eq!(snapshot.bgm_looping, restored.bgm_looping, "循环标志应一致");
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC06 — restore_state 恢复 BGM 位置。
+    ///
+    /// 验证：播放 BGM → 等待 → get_state → stop → restore_state →
+    /// BGM 恢复播放且 bgm_start_time 被重新设置。
+    #[test]
+    fn ac06_restore_position() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac06");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("restore_pos.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 播放 BGM 并等待一小段时间
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), false)
+            .expect("play_bgm 应成功");
+        std::thread::sleep(Duration::from_millis(200));
+
+        // 捕获状态
+        let snapshot = audio.get_state();
+        assert!(
+            snapshot.bgm_position_secs > 0.1,
+            "位置应 > 0.1s（已等待 200ms），实际: {:.3}",
+            snapshot.bgm_position_secs
+        );
+
+        // 停止并恢复
+        audio.stop_bgm();
+        assert!(!audio.is_bgm_playing(), "停止后应不在播放");
+
+        let result = audio.restore_state(&snapshot);
+        assert!(
+            result.is_ok(),
+            "restore_state 应返回 Ok，实际: {:?}",
+            result
+        );
+        assert!(audio.is_bgm_playing(), "恢复后应处于播放状态");
+        assert!(
+            audio.bgm_start_time.is_some(),
+            "恢复后 bgm_start_time 应被重新设置"
+        );
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC07 — restore_state 恢复音量。
+    ///
+    /// 验证：设置自定义音量 → get_state → 改变音量 → restore_state →
+    /// 音量恢复到快照值。
+    #[test]
+    fn ac07_restore_volume() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac07");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("restore_vol.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 设置自定义音量
+        audio.set_bgm_volume(0.7);
+        audio.set_se_volume(0.3);
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), true)
+            .expect("play_bgm 应成功");
+
+        // 捕获快照
+        let snapshot = audio.get_state();
+        assert!(
+            (snapshot.bgm_volume - 0.7).abs() < f32::EPSILON,
+            "快照 BGM 音量应为 0.7"
+        );
+        assert!(
+            (snapshot.se_volume - 0.3).abs() < f32::EPSILON,
+            "快照 SE 音量应为 0.3"
+        );
+
+        // 改变音量
+        audio.set_bgm_volume(0.1);
+        audio.set_se_volume(0.9);
+
+        // 恢复状态
+        audio
+            .restore_state(&snapshot)
+            .expect("restore_state 应成功");
+        assert!(
+            (audio.bgm_volume() - 0.7).abs() < f32::EPSILON,
+            "恢复后 BGM 音量应为 0.7，实际: {:.3}",
+            audio.bgm_volume()
+        );
+        assert!(
+            (audio.se_volume() - 0.3).abs() < f32::EPSILON,
+            "恢复后 SE 音量应为 0.3，实际: {:.3}",
+            audio.se_volume()
+        );
+
+        // 清理
+        audio.stop_bgm();
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// AC08 — restore_state 无 BGM 快照。
+    ///
+    /// 验证：空快照 restore 不 panic，不启动 BGM 播放。
+    #[test]
+    fn ac08_restore_empty() {
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        // 先播放 BGM
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_ac08");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("empty_snap.wav");
+        generate_test_wav(&wav_path);
+
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), false)
+            .expect("play_bgm 应成功");
+
+        // 使用空快照恢复（无 BGM）
+        let empty_snapshot = AudioSnapshot::default();
+        let result = audio.restore_state(&empty_snapshot);
+        assert!(
+            result.is_ok(),
+            "空快照 restore 应返回 Ok，实际: {:?}",
+            result
+        );
+        assert!(!audio.is_bgm_playing(), "空快照恢复后不应有 BGM 播放");
+        assert!(
+            (audio.bgm_volume() - 0.8).abs() < f32::EPSILON,
+            "空快照恢复后 BGM 音量应为默认 0.8"
+        );
+        assert!(
+            (audio.se_volume() - 0.8).abs() < f32::EPSILON,
+            "空快照恢复后 SE 音量应为默认 0.8"
+        );
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// 补充测试 — restore_state 文件不存在返回 AssetNotFound。
+    #[test]
+    fn restore_state_file_not_found() {
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        let snapshot = AudioSnapshot {
+            current_bgm_path: Some("nonexistent/restore_bgm.ogg".to_string()),
+            bgm_position_secs: 10.0,
+            bgm_looping: true,
+            bgm_volume: 0.5,
+            se_volume: 0.5,
+        };
+
+        let result = audio.restore_state(&snapshot);
+        match result {
+            Err(AudioError::AssetNotFound { path }) => {
+                assert!(path.contains("restore_bgm"), "错误应包含文件路径");
+            }
+            other => panic!("应返回 AssetNotFound，实际返回: {:?}", other),
+        }
+    }
+
+    /// 补充测试 — stop_bgm_with_fade(fade_out=0.0) 立即停止。
+    #[test]
+    fn stop_bgm_zero_fade_immediate() {
+        let temp_dir = std::env::temp_dir().join("aster_test_ph2t03_stop0");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let wav_path = temp_dir.join("stop_zero.wav");
+        generate_test_wav(&wav_path);
+
+        let mut audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        audio
+            .play_bgm(wav_path.to_str().unwrap(), false)
+            .expect("play_bgm 应成功");
+        assert!(audio.is_bgm_playing());
+
+        // fade_out=0.0 应立即停止
+        audio.stop_bgm_with_fade(0.0);
+        assert!(!audio.is_bgm_playing(), "fade_out=0.0 应立即停止");
+
+        // 清理
+        let _ = std::fs::remove_file(&wav_path);
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    /// 补充测试 — get_state 在无 BGM 播放时返回正确的默认值。
+    #[test]
+    fn get_state_no_bgm() {
+        let audio = match try_init_audio_system() {
+            Some(a) => a,
+            None => return,
+        };
+
+        let snapshot = audio.get_state();
+        assert!(
+            snapshot.current_bgm_path.is_none(),
+            "无 BGM 时路径应为 None"
+        );
+        assert!(
+            (snapshot.bgm_position_secs - 0.0).abs() < f64::EPSILON,
+            "无 BGM 时位置应为 0"
+        );
+        assert!(!snapshot.bgm_looping, "无 BGM 时循环应为 false");
+        assert!(
+            (snapshot.bgm_volume - 0.8).abs() < f32::EPSILON,
+            "默认 BGM 音量应为 0.8"
+        );
+        assert!(
+            (snapshot.se_volume - 0.8).abs() < f32::EPSILON,
+            "默认 SE 音量应为 0.8"
+        );
     }
 }
