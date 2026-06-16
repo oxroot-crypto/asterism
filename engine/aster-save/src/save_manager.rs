@@ -567,7 +567,9 @@ fn parse_slot_from_filename(path: &Path) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aster_core::{AudioSnapshot, FlagSet, RenderState, Value, VariableStore, VmSnapshot};
+    use aster_core::{
+        AudioSnapshot, CallFrameSnapshot, FlagSet, RenderState, Value, VariableStore, VmSnapshot,
+    };
 
     /// 创建测试用的临时目录路径，并在测试结束后清理。
     fn temp_save_dir(test_name: &str) -> PathBuf {
@@ -613,8 +615,11 @@ mod tests {
         data.vm_snapshot = VmSnapshot {
             pc: 100,
             registers,
-            call_stack_depth: 1,
-            stack_len: 3,
+            call_stack: vec![CallFrameSnapshot {
+                return_pc: 200,
+                saved_registers: [Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0)],
+            }],
+            stack: vec![Value::Int(1), Value::Int(2), Value::Int(3)],
         };
         data.audio_state = AudioSnapshot {
             current_bgm_path: Some("bgm/test.ogg".into()),
@@ -691,8 +696,8 @@ mod tests {
 
         // VM 快照
         assert_eq!(loaded.vm_snapshot.pc, 100);
-        assert_eq!(loaded.vm_snapshot.call_stack_depth, 1);
-        assert_eq!(loaded.vm_snapshot.stack_len, 3);
+        assert_eq!(loaded.vm_snapshot.call_stack.len(), 1);
+        assert_eq!(loaded.vm_snapshot.stack.len(), 3);
         assert_eq!(loaded.vm_snapshot.registers[0], Value::Int(42));
 
         // 音频状态

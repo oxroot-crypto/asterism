@@ -196,16 +196,25 @@ impl ApplicationHandler for EventLoop {
                 }
             }
             GameAction::Quit | GameAction::OpenMenu => {
-                app.is_running = false;
-                event_loop.exit();
+                // PH2-T08: 如果 Save UI 打开，先关闭 Save UI
+                if app.is_save_ui_open() {
+                    app.close_save_ui();
+                } else {
+                    app.is_running = false;
+                    event_loop.exit();
+                }
             }
-            GameAction::Skip
-            | GameAction::Auto
-            | GameAction::QuickSave
-            | GameAction::QuickLoad
-            | GameAction::ToggleFullscreen => {
+            GameAction::Skip | GameAction::Auto | GameAction::ToggleFullscreen => {
                 // Phase 1 预留，后续 Phase 实现
                 log::debug!("[EventLoop] 未实现的 GameAction: {:?}", action);
+            }
+            GameAction::QuickSave => {
+                // PH2-T08: 快速存档（F5）
+                app.quick_save();
+            }
+            GameAction::QuickLoad => {
+                // PH2-T08: 快速读档（F9）
+                app.quick_load();
             }
             GameAction::None => {}
         }

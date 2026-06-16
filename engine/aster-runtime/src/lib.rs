@@ -51,7 +51,7 @@ pub mod scene_manager;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_runtime::TypeName` 直接引用
 pub use app::App;
-pub use command_bridge::{MockRenderer, Renderer, dispatch};
+pub use command_bridge::{AudioSystem, MockAudioSystem, MockRenderer, Renderer, dispatch};
 pub use dialogue_controller::{DialogueAction, DialogueController, DialogueLine, DialogueState};
 pub use error::RuntimeError;
 pub use event_loop::EventLoop as AppEventLoop;

@@ -20,10 +20,10 @@
 | PH2-T05 | aster-asset — LRU 缓存策略（淘汰机制 + 命中率统计） | P0 | 4h | PH2-T04 | [x] |
 | PH2-T06 | aster-save — SaveData 数据结构 + 序列化 + CRC32 完整性校验 | P0 | 6h | 无 | [x] |
 | PH2-T07 | aster-save — 槽位管理 + 缩略图捕获 + 基础存档 UI | P0 | 6h | PH2-T06 | [x] |
-| PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
+| PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [x] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 7 | 进行中: 0 | 待开始: 2
+**统计**：总计 9 个任务 | 已完成: 8 | 进行中: 0 | 待开始: 1
 
 ---
 
@@ -1421,7 +1421,7 @@ graph TD
 | **对应需求** | REQ-ENG-030~032（音频）、REQ-ENG-011（资源加载）、REQ-ENG-040~042（存档）— 全部 Phase 2 P0 引擎需求 |
 | **对应架构模块** | `aster-runtime`（command_bridge / scene_manager / app / event_loop / renderer_impl）— 运行时编排层 |
 | **前置依赖** | PH2-T03（音频系统完整：BGM+SE+fade+快照）、PH2-T05（AssetManager 含 LRU 缓存）、PH2-T07（SaveManager + SaveUi） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1640,56 +1640,36 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-16 14:30
+- 实际工时：8 小时
+- AI 自验证结果：✅ 全部 workspace 测试通过（0 失败），clippy 零 warning
+- 人工测试结果：✅ 待验证（`cargo run -p aster-runtime -- --project templates/default_project`）
+- 备注：
+  - AudioSystem trait 定义在 command_bridge.rs（依赖反转模式）
+  - SceneManager 通过 save_pc（暂停前 PC）机制实现存档/读档位置精确恢复
+  - AssetManager 已集成到纹理和音频加载路径（纹理→GameRenderer::load_texture，音频→scene_manager PCM 路径）
+  - 创建了 aster-runtime 二进制入口（main.rs），支持 --project 参数
+  - 为模板项目生成了 12 个测试音频文件（6 BGM + 6 SE）
+  - 音频路径解析：`music "bgm_daily_life"` → `assets/bgm/bgm_daily_life.wav`
 
 **上下文交接**：
 - 关键决策：
-  - `AudioSystem` trait 定义在 `command_bridge.rs` 而非 `aster-audio` crate——遵循与 `Renderer` trait 相同的依赖反转模式（运行时定义接口，功能 crate 实现接口）
-  - AssetManager 通过 `Arc<Mutex<AssetManager>>` 共享——渲染器和 SceneManager 都可能访问资产，但 Phase 2 仅 SceneManager 单线程访问，`Arc<Mutex>` 为后续多线程预加载做准备
-  - SceneManager 的 `collect_game_state()` / `restore_game_state()` 是存档系统的核心集成点——所有子系统（VM、AudioSystem、Renderer）的状态在此汇聚
-  - 纹理加载路径不强制替换为 AssetManager——保留直接文件加载 fallback 确保向后兼容
-  - ESC 键行为：先关闭 SaveUi（如果可见），再关闭到暂停菜单；在暂停菜单再 ESC 回到游戏——三层嵌套
-- 新增接口：
-  ```rust
-  // command_bridge.rs 新增
-  pub trait AudioSystem { /* 见实现要点 */ }
-  pub fn dispatch(cmd: &EngineCommand, ctx: &GameContext, renderer: Option<&mut dyn Renderer>, audio: Option<&mut dyn AudioSystem>) -> Option<(String, String)>;
-  
-  // Renderer trait 扩展
-  pub trait Renderer {
-      // ... 已有方法
-      fn capture_screenshot(&self) -> Result<Vec<u8>, String>;
-      fn render_save_ui(&mut self, commands: &[UiCommand]);
-      fn clear_save_ui(&mut self);
-  }
-  
-  // SceneManager 新增
-  impl SceneManager {
-      pub fn set_audio_system(&mut self, audio: Box<dyn AudioSystem>);
-      pub fn set_asset_manager(&mut self, asset: Arc<Mutex<AssetManager>>);
-      pub fn set_save_manager(&mut self, save: Arc<SaveManager>);
-      pub fn enter_save_menu(&mut self);
-      pub fn enter_load_menu(&mut self);
-      pub fn handle_save_ui_input(&mut self, action: UiAction);
-      pub fn collect_game_state(&self) -> SaveData;
-      pub fn restore_game_state(&mut self, data: &SaveData) -> Result<(), String>;
-  }
-  
-  // App 新增
-  impl App {
-      pub fn quick_save(&mut self) -> Result<(), String>;
-      pub fn quick_load(&mut self) -> Result<(), String>;
-  }
-  ```
+  - `AudioSystem` trait 定义在 `command_bridge.rs` —— 遵循与 `Renderer` 相同的依赖反转模式
+  - `save_pc` 机制：update() 循环中记录 pre_step_pc，暂停时保存为 save_pc；采集状态时使用 save_pc 而非 vm.pc()；恢复时 VM 从 save_pc 重放，自动重新发出所有渲染命令（bg/show/dialogue）
+  - AssetManager 通过 `Arc<Mutex<AssetManager>>` 共享到 SceneManager 和 GameRenderer
+  - 音频 PCM 路径：AssetManager → AudioLoader 解码 → `encode_wav()` → kira `from_cursor()` 播放（避免重复解码）
+  - 测试音频通过 `aster-audio/examples/gen_test_audio.rs` 生成
+- 新增接口：见上文任务说明中的完整接口列表
 - 已知限制：
-  - `collect_game_state()` 需要当前渲染状态（背景/立绘列表）——这些信息需要从 `GameRenderer` 中查询，但目前 Renderer trait 没有 `get_render_state()` 方法。本任务在 `Renderer` trait 中新增该方法，或在 SceneManager 中跟踪渲染命令的副作用（后者更简单——SceneManager 已经知道每个 scene 的 bg/show/hide 命令序列，重建即可）
-  - 快速存档的截图因 GPU 回读延迟（~10-20ms），不影响游戏帧率但在快节奏的 F5 连按时可能略有感知
-  - AssetManager 的纹理加载集成是可选的——如果 renderer_impl 已有直接文件加载逻辑，保留为 fallback 确保不引入回归
-- 建议下一个任务先读取：`engine/aster-runtime/src/scene_manager.rs`、`engine/aster-runtime/src/command_bridge.rs`、`engine/aster-runtime/src/app.rs`
+  - 截图功能需 GPU 回读（~10-20ms），低频存档操作中可接受
+  - 渲染状态追踪在 process_action 中进行（手动维护 render_state）
+  - AssetManager 音频路径仅支持无 fade 场景（fade_reg == 0xFF）
+- 建议下一个任务（PH2-T09）先读取：
+  - `engine/aster-runtime/src/scene_manager.rs` — process_action 中的 save_pc / render_state / AssetManager 逻辑
+  - `engine/aster-runtime/src/command_bridge.rs` — AudioSystem trait + dispatch
+  - `engine/aster-runtime/src/app.rs` — 子系统初始化链
+  - `engine/aster-audio/src/audio_system.rs` — PCM 播放接口
+
 ### PH2-T09 — 集成测试：基础流程 + 异常路径 + 性能验证
 
 | 属性 | 内容 |

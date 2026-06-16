@@ -180,12 +180,19 @@ impl InputManager {
     /// 键盘按键 → 游戏动作映射（Phase 1 默认绑定）。
     ///
     /// Phase 1 默认绑定：
+    /// 键盘按键 → 游戏动作映射。
+    ///
+    /// Phase 2 默认绑定：
     /// - Enter / Space → `Advance`
     /// - Escape → `OpenMenu`
+    /// - F5 → `QuickSave`
+    /// - F9 → `QuickLoad`
     fn map_key_to_action(key: &Key) -> GameAction {
         match key {
             Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => GameAction::Advance,
             Key::Named(NamedKey::Escape) => GameAction::OpenMenu,
+            Key::Named(NamedKey::F5) => GameAction::QuickSave,
+            Key::Named(NamedKey::F9) => GameAction::QuickLoad,
             _ => GameAction::None,
         }
     }

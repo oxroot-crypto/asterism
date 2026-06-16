@@ -17,7 +17,9 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::error::AudioError;
-use crate::snapshot::AudioSnapshot;
+// PH2-T08: AudioSnapshot 统一使用 aster_core::save 中的定义
+// 避免 aster-core 和 aster-audio 之间的类型重复
+use aster_core::save::AudioSnapshot;
 
 /// 将振幅比值（0.0 ~ 1.0）转换为分贝值。
 ///
@@ -203,6 +205,68 @@ impl AudioSystem {
                 reason: format!("无法解码音频文件 \"{}\"：{}", asset_path, e),
             }
         })
+    }
+
+    /// 从 PCM 样本数据创建 kira StaticSoundData。
+    ///
+    /// 将 AssetManager 的 AudioLoader 解码后的 f32 交错样本
+    /// 编码为 WAV 格式（内存中），通过 kira 的 `from_cursor` 接口加载。
+    /// f32 → i16 转换带简单限幅。
+    fn sound_data_from_pcm(
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+    ) -> Result<kira::sound::static_sound::StaticSoundData, AudioError> {
+        // 步骤 1：f32 PCM → i16 PCM（WAV 标准格式）
+        let i16_samples: Vec<i16> = samples
+            .iter()
+            .map(|&s| {
+                let clamped = s.clamp(-1.0, 1.0);
+                (clamped * 32767.0) as i16
+            })
+            .collect();
+
+        // 步骤 2：写入 WAV 格式到内存
+        let wav_bytes = Self::encode_wav(&i16_samples, sample_rate, channels);
+
+        // 步骤 3：通过 kira from_cursor 加载
+        kira::sound::static_sound::StaticSoundData::from_cursor(std::io::Cursor::new(wav_bytes))
+            .map_err(|e| AudioError::DecodeError {
+                reason: format!("无法从 PCM 创建音频数据：{}", e),
+            })
+    }
+
+    /// 将 i16 PCM 编码为 WAV 字节（最小实现）。
+    fn encode_wav(i16_samples: &[i16], sample_rate: u32, channels: u16) -> Vec<u8> {
+        let data_size = (i16_samples.len() * 2) as u32;
+        let file_size = 44 + data_size;
+        let mut buf = Vec::with_capacity(file_size as usize);
+
+        // RIFF header
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&file_size.to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+
+        // fmt chunk
+        let byte_rate = sample_rate * channels as u32 * 2;
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes()); // chunk size
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM format
+        buf.extend_from_slice(&channels.to_le_bytes());
+        buf.extend_from_slice(&sample_rate.to_le_bytes());
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        let block_align = channels * 2;
+        buf.extend_from_slice(&block_align.to_le_bytes());
+        buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+
+        // data chunk
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&data_size.to_le_bytes());
+        for &sample in i16_samples {
+            buf.extend_from_slice(&sample.to_le_bytes());
+        }
+
+        buf
     }
 
     /// 加载并播放背景音乐（BGM）。
@@ -613,6 +677,77 @@ impl AudioSystem {
             .play(sound_data)
             .map_err(|e| AudioError::PlaybackError {
                 reason: format!("无法播放音效 \"{}\"：{}", asset_path, e),
+            })?;
+
+        Ok(())
+    }
+
+    // ─── PH2-T08: 从 AssetManager PCM 数据播放 ──────────────────────────
+
+    /// 从已解码的 PCM 样本播放 BGM（供 AssetManager 集成使用）。
+    ///
+    /// AssetManager 的 AudioLoader 解码后得到 f32 交错样本，
+    /// 此方法将其编码为 WAV 后通过 kira 播放，避免重复解码。
+    pub fn play_bgm_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        looping: bool,
+        fade_in: f64,
+    ) -> Result<(), AudioError> {
+        self.stop_bgm_with_fade(0.0);
+
+        let mut sound_data = Self::sound_data_from_pcm(samples, sample_rate, channels)?;
+
+        if looping {
+            sound_data = sound_data.loop_region(kira::sound::Region::from(..));
+        }
+
+        if fade_in > 0.0 {
+            let tween = kira::Tween {
+                duration: Duration::from_secs_f64(fade_in),
+                ..Default::default()
+            };
+            sound_data = sound_data.fade_in_tween(Some(tween));
+        }
+
+        let handle = self
+            .bgm_track
+            .play(sound_data)
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法从 PCM 播放 BGM：{}", e),
+            })?;
+
+        self.bgm_handle = Some(handle);
+        self.current_bgm_path = Some("pcm://bgm".into());
+        self.bgm_looping = looping;
+        self.bgm_start_time = Some(Instant::now());
+        Ok(())
+    }
+
+    /// 从已解码的 PCM 样本播放 SE（供 AssetManager 集成使用）。
+    pub fn play_se_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        fade_in: f64,
+    ) -> Result<(), AudioError> {
+        let mut sound_data = Self::sound_data_from_pcm(samples, sample_rate, channels)?;
+
+        if fade_in > 0.0 {
+            let tween = kira::Tween {
+                duration: Duration::from_secs_f64(fade_in),
+                ..Default::default()
+            };
+            sound_data = sound_data.fade_in_tween(Some(tween));
+        }
+
+        self.se_track
+            .play(sound_data)
+            .map_err(|e| AudioError::PlaybackError {
+                reason: format!("无法从 PCM 播放 SE：{}", e),
             })?;
 
         Ok(())

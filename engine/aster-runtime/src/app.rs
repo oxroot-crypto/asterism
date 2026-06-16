@@ -21,21 +21,88 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use aster_audio::AudioSystem as AudioSystemImpl;
 use aster_compiler::{GameCompileInput, GameCompiler};
 use aster_core::Scene;
 use aster_renderer::{GpuContext, RenderConfig};
+use aster_save::{QUICK_SLOT, SaveManager, SaveUiMode, UiAction};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
+use crate::command_bridge::{AudioSystem, Renderer as RendererTrait};
 use crate::error::RuntimeError;
 use crate::game_context::GameContext;
 use crate::game_loader::GameLoader;
 use crate::input_manager::{GameAction, InputManager};
 use crate::renderer_impl::GameRenderer;
 use crate::scene_manager::{SceneManager, SceneState};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PH2-T08: AudioSystem trait 适配 aster_audio::AudioSystem
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// 将 `aster_audio::AudioSystem` 适配为 `command_bridge::AudioSystem` trait。
+///
+/// 这个 impl 桥接了两个接口：aster-audio crate 的具体实现和
+/// command_bridge 中定义的抽象 trait。方法签名差异（如错误类型）
+/// 在此处统一。
+impl AudioSystem for aster_audio::AudioSystem {
+    fn play_bgm(&mut self, asset_path: &str, looping: bool, fade_in: f64) -> Result<(), String> {
+        self.play_bgm_with_fade(asset_path, looping, fade_in)
+            .map_err(|e| e.to_string())
+    }
+
+    fn stop_bgm(&mut self, fade_out: f64) {
+        self.stop_bgm_with_fade(fade_out);
+    }
+
+    fn play_se(&mut self, asset_path: &str, fade_in: f64) -> Result<(), String> {
+        self.play_se_with_fade(asset_path, fade_in)
+            .map_err(|e| e.to_string())
+    }
+
+    fn set_bgm_volume(&mut self, volume: f32) {
+        self.set_bgm_volume(volume);
+    }
+
+    fn set_se_volume(&mut self, volume: f32) {
+        self.set_se_volume(volume);
+    }
+
+    fn play_bgm_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        looping: bool,
+        fade_in: f64,
+    ) -> Result<(), String> {
+        self.play_bgm_from_pcm(samples, sample_rate, channels, looping, fade_in)
+            .map_err(|e| e.to_string())
+    }
+
+    fn play_se_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        fade_in: f64,
+    ) -> Result<(), String> {
+        self.play_se_from_pcm(samples, sample_rate, channels, fade_in)
+            .map_err(|e| e.to_string())
+    }
+
+    fn get_state(&self) -> aster_core::save::AudioSnapshot {
+        self.get_state()
+    }
+
+    fn restore_state(&mut self, snapshot: &aster_core::save::AudioSnapshot) -> Result<(), String> {
+        self.restore_state(snapshot).map_err(|e| e.to_string())
+    }
+}
 
 /// 引擎顶层入口 — 持有所有运行时子系统，是引擎对外的唯一启动接口。
 ///
@@ -110,6 +177,14 @@ pub struct App {
 
     /// 上一帧时间戳（用于计算 delta_time）
     last_frame_time: Option<Instant>,
+
+    // PH2-T08 新增: 子系统
+    /// 资源管理器（Arc<Mutex> 用于跨子系统共享）
+    asset_manager: Option<Arc<Mutex<aster_asset::AssetManager>>>,
+    /// 存档管理器
+    save_manager: Option<Arc<SaveManager>>,
+    /// 当前存档/读档 UI 模式（None = UI 未打开）
+    save_ui_mode: Option<SaveUiMode>,
 }
 
 impl App {
@@ -192,6 +267,10 @@ impl App {
             target_fps: 60,
             resize_pending: None,
             last_frame_time: None,
+            // PH2-T08: 子系统在 init_gpu 中延迟初始化
+            asset_manager: None,
+            save_manager: None,
+            save_ui_mode: None,
         })
     }
 
@@ -262,6 +341,7 @@ impl App {
             size.width,
             size.height,
             self.project_root.clone(),
+            None, // AssetManager 在下面创建后注入
         );
 
         // 步骤 3：创建场景管理器并加载入口场景
@@ -275,11 +355,71 @@ impl App {
         // 步骤 4：执行首帧 VM（到第一个对话/菜单暂停点）
         let _ = manager.update(Some(&mut renderer));
 
+        // ─── PH2-T08: 子系统初始化 ────────────────────────────────────
+
+        // 初始化音频系统
+        let mut audio_impl = match AudioSystemImpl::new() {
+            Ok(a) => {
+                log::info!("[App] 音频系统初始化成功");
+                Some(a)
+            }
+            Err(e) => {
+                log::warn!("[App] 音频系统初始化失败: {}，继续无音频运行", e);
+                None
+            }
+        };
+        // 设置默认音量（从 GameSettings 读取）
+        if let Some(ref mut audio) = audio_impl {
+            let _ = audio; // 占位，后续从 GameSettings 读取
+        }
+
+        // 初始化资源管理器
+        let asset_mgr = {
+            let mut mgr = aster_asset::AssetManager::new(self.project_root.clone());
+            match mgr.scan_assets() {
+                Ok(count) => {
+                    log::info!("[App] 资源扫描完成: {} 个资源", count);
+                }
+                Err(e) => {
+                    log::warn!("[App] 资源扫描失败: {}，继续", e);
+                }
+            }
+            // 注册加载器（TextureLoader 需要 wgpu Device/Queue）
+            let device = gpu.device().clone();
+            let queue = gpu.queue().clone();
+            let texture_loader = std::sync::Arc::new(aster_asset::TextureLoader::new(
+                std::sync::Arc::new(device),
+                std::sync::Arc::new(queue),
+            ));
+            mgr.register_loader(texture_loader);
+            mgr.register_loader(std::sync::Arc::new(aster_asset::AudioLoader::new()));
+            Arc::new(Mutex::new(mgr))
+        };
+
+        // 初始化存档管理器（存档目录 = project_root/save）
+        let save_mgr = {
+            let save_dir = self.project_root.join("save");
+            let _ = fs::create_dir_all(&save_dir);
+            Arc::new(SaveManager::new(save_dir))
+        };
+
+        // 注入子系统到 SceneManager
+        if let Some(audio) = audio_impl {
+            manager.set_audio_system(Box::new(audio));
+        }
+        manager.set_asset_manager(asset_mgr.clone());
+        manager.set_save_manager(save_mgr.clone());
+
+        // 注入 AssetManager 到渲染器（用于纹理加载+LRU 缓存）
+        renderer.set_asset_manager(asset_mgr.clone());
+
         self.gpu_context = Some(gpu);
         self.renderer = Some(renderer);
         self.scene_manager = Some(manager);
         self.window = Some(window);
         self.last_frame_time = Some(Instant::now());
+        self.asset_manager = Some(asset_mgr);
+        self.save_manager = Some(save_mgr);
     }
 
     // ========================================================================
@@ -424,6 +564,181 @@ impl App {
         {
             log::error!("[App] 菜单选择失败（index={}）：{e}", index);
         }
+    }
+
+    // ========================================================================
+    // PH2-T08: 存档/读档操作
+    // ========================================================================
+
+    /// 进入存档菜单。
+    pub fn enter_save_menu(&mut self) {
+        if let Some(ref mut mgr) = self.scene_manager {
+            if let Err(e) = mgr.enter_save_menu() {
+                log::error!("[App] 打开存档菜单失败: {}", e);
+                return;
+            }
+            self.save_ui_mode = Some(SaveUiMode::Save);
+            // 渲染 Save UI 命令到渲染器
+            if let Some(ref mut rnd) = self.renderer {
+                let commands = mgr.save_ui().render_commands();
+                rnd.render_save_ui(&commands);
+            }
+        }
+    }
+
+    /// 进入读档菜单。
+    pub fn enter_load_menu(&mut self) {
+        if let Some(ref mut mgr) = self.scene_manager {
+            if let Err(e) = mgr.enter_load_menu() {
+                log::error!("[App] 打开读档菜单失败: {}", e);
+                return;
+            }
+            self.save_ui_mode = Some(SaveUiMode::Load);
+            if let Some(ref mut rnd) = self.renderer {
+                let commands = mgr.save_ui().render_commands();
+                rnd.render_save_ui(&commands);
+            }
+        }
+    }
+
+    /// 关闭存档/读档 UI。
+    pub fn close_save_ui(&mut self) {
+        self.save_ui_mode = None;
+        if let Some(ref mut mgr) = self.scene_manager {
+            mgr.close_save_ui();
+        }
+        if let Some(ref mut rnd) = self.renderer {
+            rnd.clear_save_ui();
+        }
+    }
+
+    /// 处理存档/读档 UI 中的输入。
+    ///
+    /// # 参数
+    /// - `action`: UI 动作（Up/Down/Confirm/Cancel/Delete）
+    pub fn handle_save_ui_input(&mut self, action: UiAction) {
+        let mode = match self.save_ui_mode {
+            Some(m) => m,
+            None => return,
+        };
+
+        let load_performed = match self.scene_manager.as_mut() {
+            Some(mgr) => {
+                let mut rnd = self.renderer.as_mut().map(|r| r as &mut dyn RendererTrait);
+                match mgr.handle_save_ui_input(action, mode, &mut rnd) {
+                    Ok(loaded) => loaded,
+                    Err(e) => {
+                        log::error!("[App] 存档操作失败: {}", e);
+                        return;
+                    }
+                }
+            }
+            None => return,
+        };
+
+        // 刷新 UI 渲染
+        if let (Some(mgr), Some(rnd)) = (&self.scene_manager, &mut self.renderer) {
+            if mgr.is_save_ui_open() {
+                let commands = mgr.save_ui().render_commands();
+                rnd.render_save_ui(&commands);
+            } else {
+                rnd.clear_save_ui();
+                self.save_ui_mode = None;
+            }
+        }
+
+        if load_performed {
+            // 读档后需要重新执行场景
+            if let (Some(mgr), Some(rnd)) = (self.scene_manager.as_mut(), self.renderer.as_mut()) {
+                let _ = mgr.update(Some(rnd));
+            }
+        }
+    }
+
+    /// 快速存档（F5）。
+    ///
+    /// 收集当前游戏状态并保存到快速存档槽位（98）。
+    pub fn quick_save(&mut self) {
+        let save_mgr = match self.save_manager.as_ref() {
+            Some(m) => m.clone(),
+            None => {
+                log::warn!("[App] 存档管理器未初始化，无法快速存档");
+                return;
+            }
+        };
+
+        let save_data = match self.scene_manager.as_ref() {
+            Some(mgr) => mgr.collect_game_state(QUICK_SLOT),
+            None => return,
+        };
+
+        match save_mgr.save(QUICK_SLOT, &save_data) {
+            Ok(info) => {
+                let msg = format!(
+                    "💾 快速存档完成: 槽位 {}, 场景 {}, {}",
+                    info.slot, info.scene_id, info.timestamp
+                );
+                log::info!("[App] {}", msg);
+                eprintln!("{msg}");
+            }
+            Err(e) => {
+                log::error!("[App] 快速存档失败: {}", e);
+                eprintln!("❌ 快速存档失败: {e}");
+            }
+        }
+    }
+
+    /// 快速读档（F9）。
+    ///
+    /// 从快速存档槽位（98）恢复游戏状态。
+    pub fn quick_load(&mut self) {
+        let save_mgr = match self.save_manager.as_ref() {
+            Some(m) => m.clone(),
+            None => {
+                log::warn!("[App] 存档管理器未初始化，无法快速读档");
+                return;
+            }
+        };
+
+        let save_data = match save_mgr.load(QUICK_SLOT) {
+            Ok(data) => data,
+            Err(e) => {
+                log::error!("[App] 快速读档失败: {}", e);
+                return;
+            }
+        };
+
+        // 读档后恢复游戏状态并重放渲染命令
+        {
+            let (mgr, rnd) = match (self.scene_manager.as_mut(), self.renderer.as_mut()) {
+                (Some(m), Some(r)) => (m, r),
+                _ => return,
+            };
+
+            // 步骤 1：恢复游戏状态（应用 render_state 到画面）
+            {
+                let mut rnd_opt: Option<&mut dyn RendererTrait> = Some(rnd);
+                if let Err(e) = mgr.restore_game_state(&save_data, &mut rnd_opt) {
+                    log::error!("[App] 游戏状态恢复失败: {}", e);
+                    return;
+                }
+            }
+
+            // 步骤 2：从 save_pc 执行 VM 到下一个暂停点
+            // save_pc 指向暂停指令之前，VM 重放会重新发出
+            // SetBg/ShowChar/SetDialogue 等渲染命令，将画面同步到存档时状态
+            let _ = mgr.update(Some(rnd));
+        }
+
+        let msg = format!("📂 快速读档完成: 恢复到场景 {}", save_data.scene_id);
+        log::info!("[App] {}", msg);
+        eprintln!("{msg}");
+    }
+
+    /// 检查存档 UI 是否打开。
+    #[inline]
+    pub fn is_save_ui_open(&self) -> bool {
+        self.save_ui_mode.is_some()
     }
 
     // ========================================================================
@@ -618,6 +933,7 @@ mod tests {
             1920,
             1080,
             app.project_root.clone(),
+            None,
         ));
 
         // 执行 resize

@@ -11,13 +11,17 @@ aster-compiler = { workspace = true }
 aster-vm = { workspace = true }
 aster-parser = { workspace = true }
 aster-renderer = { workspace = true }
+aster-audio = { workspace = true }
+aster-asset = { workspace = true }
+aster-save = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 toml = "0.8"
 thiserror = { workspace = true }
+chrono = { workspace = true }
+image = { workspace = true }
 log = "0.4"
 
 [dev-dependencies]
 aster-parser = { workspace = true }
-image = { workspace = true }

@@ -349,11 +349,15 @@ dependencies = [
 name = "aster-runtime"
 version = "0.1.0"
 dependencies = [
+ "aster-asset",
+ "aster-audio",
  "aster-compiler",
  "aster-core",
  "aster-parser",
  "aster-renderer",
+ "aster-save",
  "aster-vm",
+ "chrono",
  "image",
  "log",
  "serde",

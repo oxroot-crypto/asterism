@@ -132,4 +132,8 @@ pub enum RuntimeError {
         /// 错误描述
         message: String,
     },
+
+    /// 存档操作错误 — PH2-T08 新增
+    #[error("存档操作错误：{0}")]
+    SaveError(String),
 }

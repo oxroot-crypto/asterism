@@ -148,6 +148,62 @@ impl std::fmt::Debug for Texture {
 }
 
 impl Texture {
+    /// 从已有的 wgpu 纹理和视图创建 Texture 封装（包装采样器和绑定组）。
+    ///
+    /// 用于 AssetManager 等已持有 GPU 纹理的场景，避免重复上传。
+    ///
+    /// # 参数
+    /// - `device`: wgpu 设备引用
+    /// - `gpu_texture`: 已有的 wgpu 纹理
+    /// - `texture_view`: 已有的纹理视图
+    /// - `width` / `height`: 纹理像素尺寸
+    /// - `label`: 调试标签
+    pub fn from_wgpu_texture(
+        device: &Device,
+        gpu_texture: wgpu::Texture,
+        texture_view: wgpu::TextureView,
+        width: u32,
+        height: u32,
+        label: Option<&str>,
+    ) -> Self {
+        let sampler = device.create_sampler(&SamplerDescriptor {
+            label: label.map(|l| format!("{l}_sampler")).as_deref(),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let bind_group_layout = create_texture_bind_group_layout(device);
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: label.map(|l| format!("{l}_bind_group")).as_deref(),
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&texture_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        Self {
+            id: next_texture_id(),
+            texture: gpu_texture,
+            sampler,
+            bind_group,
+            width,
+            height,
+        }
+    }
+
     /// 从文件路径加载纹理。
     ///
     /// 读取文件字节后调用 `from_bytes` 完成解码和 GPU 上传。

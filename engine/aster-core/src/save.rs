@@ -106,14 +106,27 @@ impl Default for AudioSnapshot {
     }
 }
 
+// ─── CallFrameSnapshot ────────────────────────────────────────────────────────
+
+/// 调用帧快照 — `aster_vm::CallFrame` 的可序列化版本。
+///
+/// 用于 `VmSnapshot` 记录子例程调用的完整状态，
+/// 确保读档后能正确恢复调用链和返回地址。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CallFrameSnapshot {
+    /// 返回地址：子例程完成后应跳转到的字节偏移
+    pub return_pc: usize,
+    /// 调用时保存的 r0-r3 寄存器值
+    pub saved_registers: [Value; 4],
+}
+
 // ─── VmSnapshot ─────────────────────────────────────────────────────────────
 
 /// VM 执行状态快照 — 捕获虚拟机在某一时刻的完整执行上下文。
 ///
 /// 用于存档时保存 VM 的执行进度，读档时恢复 VM 到相同位置继续执行。
-/// 当前仅保存 PC（程序计数器）、16 个通用寄存器和调用栈深度——
-/// 不含完整的 `call_stack` 中文变量名（子例程调用点），后续如需
-/// 调试器功能可扩展。
+/// 包含 PC、16 个通用寄存器、完整调用栈（支持子例程嵌套恢复）
+/// 和操作数栈内容。
 ///
 /// # 字段说明
 ///
@@ -121,8 +134,8 @@ impl Default for AudioSnapshot {
 /// |------|------|------|
 /// | `pc` | `usize` | 程序计数器 — 当前执行的字节码指令位置 |
 /// | `registers` | `[Value; 16]` | 16 个通用寄存器的快照（VM 使用固定 16 个寄存器） |
-/// | `call_stack_depth` | `usize` | 调用栈深度 — 嵌套子例程调用的层数 |
-/// | `stack_len` | `usize` | 操作数栈当前元素数量 |
+/// | `call_stack` | `Vec<CallFrameSnapshot>` | 调用栈完整快照（每次 CALL 压入一帧） |
+/// | `stack` | `Vec<Value>` | 操作数栈当前内容 |
 ///
 /// # 固定寄存器数量说明
 ///
@@ -135,14 +148,14 @@ pub struct VmSnapshot {
     pub pc: usize,
     /// 16 个通用寄存器的快照
     pub registers: [Value; 16],
-    /// 调用栈深度
-    pub call_stack_depth: usize,
-    /// 操作数栈当前大小
-    pub stack_len: usize,
+    /// 调用栈完整快照（最近调用在末尾）
+    pub call_stack: Vec<CallFrameSnapshot>,
+    /// 操作数栈当前内容（栈顶在末尾）
+    pub stack: Vec<Value>,
 }
 
 impl Default for VmSnapshot {
-    /// 创建默认的 VM 快照 — 所有寄存器初始化为 Int(0)，PC 和栈深度为 0。
+    /// 创建默认的 VM 快照 — 所有寄存器初始化为 Int(0)，PC 为 0，栈为空。
     fn default() -> Self {
         Self {
             pc: 0,
@@ -165,8 +178,8 @@ impl Default for VmSnapshot {
                 Value::Int(0),
                 Value::Int(0),
             ],
-            call_stack_depth: 0,
-            stack_len: 0,
+            call_stack: Vec::new(),
+            stack: Vec::new(),
         }
     }
 }
@@ -440,13 +453,13 @@ mod tests {
 
     // ─── VmSnapshot 测试 ────────────────────────────────────────────────────
 
-    /// 验证 VmSnapshot 默认值 —— PC 和栈深度为 0，寄存器全为 Int(0)。
+    /// 验证 VmSnapshot 默认值 —— PC 和栈为空，寄存器全为 Int(0)。
     #[test]
     fn test_vm_snapshot_default() {
         let snapshot = VmSnapshot::default();
         assert_eq!(snapshot.pc, 0);
-        assert_eq!(snapshot.call_stack_depth, 0);
-        assert_eq!(snapshot.stack_len, 0);
+        assert!(snapshot.call_stack.is_empty());
+        assert!(snapshot.stack.is_empty());
         assert_eq!(snapshot.registers.len(), 16);
         for reg in &snapshot.registers {
             assert_eq!(*reg, Value::Int(0));
@@ -484,16 +497,25 @@ mod tests {
         let original = VmSnapshot {
             pc: 100,
             registers,
-            call_stack_depth: 3,
-            stack_len: 7,
+            call_stack: vec![CallFrameSnapshot {
+                return_pc: 200,
+                saved_registers: [
+                    Value::Int(10),
+                    Value::Int(20),
+                    Value::Int(30),
+                    Value::Int(40),
+                ],
+            }],
+            stack: vec![Value::Int(1), Value::Int(2), Value::Int(3)],
         };
 
         let bytes = rmp_serde::to_vec(&original).expect("序列化应成功");
         let restored: VmSnapshot = rmp_serde::from_slice(&bytes).expect("反序列化应成功");
 
         assert_eq!(restored.pc, 100);
-        assert_eq!(restored.call_stack_depth, 3);
-        assert_eq!(restored.stack_len, 7);
+        assert_eq!(restored.call_stack.len(), 1);
+        assert_eq!(restored.call_stack[0].return_pc, 200);
+        assert_eq!(restored.stack.len(), 3);
         assert_eq!(restored.registers[0], Value::Int(42));
         assert_eq!(restored.registers[1], Value::String("sayori".into()));
         assert_eq!(restored.registers[2], Value::Bool(true));
@@ -591,8 +613,11 @@ mod tests {
         let vm_snapshot = VmSnapshot {
             pc: 42,
             registers,
-            call_stack_depth: 2,
-            stack_len: 5,
+            call_stack: vec![CallFrameSnapshot {
+                return_pc: 100,
+                saved_registers: [Value::Int(0), Value::Int(0), Value::Int(0), Value::Int(0)],
+            }],
+            stack: vec![Value::Int(1); 5],
         };
 
         // 构造 AudioSnapshot
@@ -645,8 +670,8 @@ mod tests {
 
         // VM 快照
         assert_eq!(restored.vm_snapshot.pc, 42);
-        assert_eq!(restored.vm_snapshot.call_stack_depth, 2);
-        assert_eq!(restored.vm_snapshot.stack_len, 5);
+        assert_eq!(restored.vm_snapshot.call_stack.len(), 1);
+        assert_eq!(restored.vm_snapshot.stack.len(), 5);
         assert_eq!(restored.vm_snapshot.registers[0], Value::Int(15));
 
         // 变量

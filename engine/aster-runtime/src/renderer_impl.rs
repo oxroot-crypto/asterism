@@ -6,24 +6,28 @@
 //!           Phase 1 完整实现渲染命令 → GPU 操作的转换链路。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-15
-//! 最后修改：2026-06-15
+//! 最后修改：2026-06-16
 //!
 //! 依赖模块：
-//! - aster_renderer（BackgroundLayer / SpriteLayer / SpritePosition / TextRenderer / Texture）
-//! - wgpu（Device / Queue / CommandEncoder / TextureView）
+//! - aster_renderer（BackgroundLayer / SpriteLayer / SpritePosition / TextRenderer / Texture / frame_capture）
+//! - aster_save（UiCommand — 存档 UI 渲染指令）
+//! - wgpu（Device / Queue / CommandEncoder / TextureView / SurfaceTexture）
 //! - crate::command_bridge::Renderer（trait 定义）
 //!
-//! 对应任务：PH1-T18 — Renderer trait 的真实实现
+//! 对应任务：PH1-T18 — Renderer trait 的真实实现；PH2-T08 — 集成截图/UI 渲染
 //! 架构位置：aster-runtime — 依赖 aster-renderer，由 PH1-T21 主事件循环实例化
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use std::path::PathBuf;
 
+use aster_asset::AssetManager;
 use aster_renderer::{
     BackgroundLayer, Layer, SpriteDescriptor, SpriteLayer, SpritePosition, TextConfig,
     TextRenderer, Texture,
 };
+use image::ImageEncoder;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
 use crate::command_bridge::Renderer;
@@ -50,6 +54,12 @@ pub struct GameRenderer {
     /// 屏幕尺寸
     pub screen_width: u32,
     pub screen_height: u32,
+    /// PH2-T08: 存档/读档 UI 是否激活
+    save_ui_active: bool,
+    /// PH2-T08: 存档/读档 UI 格式化后的文本
+    save_ui_text: String,
+    /// PH2-T08: 资源管理器（用于统一资源加载+LRU 缓存）
+    asset_manager: Option<Arc<Mutex<AssetManager>>>,
 }
 
 impl GameRenderer {
@@ -60,6 +70,7 @@ impl GameRenderer {
         screen_width: u32,
         screen_height: u32,
         project_root: PathBuf,
+        asset_manager: Option<Arc<Mutex<AssetManager>>>,
     ) -> Self {
         // Clone Device/Queue — wgpu 内部 Arc，开销极低
         let device_owned = device.clone();
@@ -92,6 +103,9 @@ impl GameRenderer {
             project_root,
             screen_width,
             screen_height,
+            save_ui_active: false,
+            save_ui_text: String::new(),
+            asset_manager,
         }
     }
 
@@ -136,6 +150,145 @@ impl GameRenderer {
 
         // 文本
         self.text_renderer.render(encoder, output_view);
+
+        // PH2-T08: Save UI 叠加层
+        // 如果存档/读档 UI 激活，将 UI 文本渲染为叠加层
+        if self.save_ui_active && !self.save_ui_text.is_empty() {
+            self.text_renderer.set_text("", &self.save_ui_text);
+            self.text_renderer.set_visible_range(0, usize::MAX);
+            self.text_renderer.prepare(&self.device, &self.queue);
+            self.text_renderer.render(encoder, output_view);
+        }
+    }
+
+    /// 从 wgpu SurfaceTexture 截取当前帧，返回降采样后的 RGB 像素数据。
+    ///
+    /// 在 `render()` 之后、`present()` 之前调用。
+    /// 使用 GPU → CPU 回读（copy_texture_to_buffer + map_async），
+    /// 对性能有约 10-20ms 影响，仅应在存档等低频操作中使用。
+    ///
+    /// # 参数
+    /// - `surface_texture`: 当前帧的 swapchain 纹理
+    /// - `thumbnail_width` / `thumbnail_height`: 缩略图尺寸（默认 320×180）
+    ///
+    /// # 性能
+    /// - GPU 回读开销约 10-20ms（低频操作，存档时使用）
+    pub fn capture_from_surface(
+        &self,
+        surface_texture: &wgpu::SurfaceTexture,
+        thumbnail_width: u32,
+        thumbnail_height: u32,
+    ) -> Result<Vec<u8>, String> {
+        let width = self.screen_width;
+        let height = self.screen_height;
+        let pixel_bytes = (width * height * 4) as u64;
+
+        // 创建 staging buffer 用于 GPU → CPU 回读
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("截图 Staging Buffer"),
+            size: pixel_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // 从 surface texture 拷贝到 staging buffer
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("截图 Command Encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &surface_texture.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &staging_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // 提交并等待 GPU 完成
+        self.queue.submit(Some(encoder.finish()));
+        self.device.poll(wgpu::Maintain::Wait);
+
+        // 映射并读取数据
+        let buffer_slice = staging_buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+
+        rx.recv()
+            .map_err(|_| "截图: 无法接收 map 结果".to_string())?
+            .map_err(|e| format!("截图: buffer map 失败: {}", e))?;
+
+        let data = buffer_slice.get_mapped_range();
+        let rgba_pixels: Vec<u8> = data[..pixel_bytes as usize].to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        // 简单降采样到缩略图尺寸（最近邻采样）
+        let thumb = Self::downsample_rgba(
+            &rgba_pixels,
+            width,
+            height,
+            thumbnail_width,
+            thumbnail_height,
+        );
+
+        // 编码为 PNG（image 0.25 API: write_image）
+        let mut png_bytes = Vec::new();
+        {
+            let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+            encoder
+                .write_image(
+                    &thumb,
+                    thumbnail_width,
+                    thumbnail_height,
+                    image::ExtendedColorType::Rgba8,
+                )
+                .map_err(|e| format!("截图 PNG 编码失败: {}", e))?;
+        }
+
+        Ok(png_bytes)
+    }
+
+    /// 最近邻降采样 RGBA 像素到目标尺寸。
+    fn downsample_rgba(
+        pixels: &[u8],
+        src_width: u32,
+        src_height: u32,
+        dst_width: u32,
+        dst_height: u32,
+    ) -> Vec<u8> {
+        let mut out = Vec::with_capacity((dst_width * dst_height * 4) as usize);
+        for dy in 0..dst_height {
+            let sy = (dy as f64 * src_height as f64 / dst_height as f64) as u32;
+            for dx in 0..dst_width {
+                let sx = (dx as f64 * src_width as f64 / dst_width as f64) as u32;
+                let idx = ((sy * src_width + sx) * 4) as usize;
+                out.extend_from_slice(&pixels[idx..idx + 4]);
+            }
+        }
+        out
+    }
+
+    /// PH2-T08: 设置资源管理器（在 AssetManager 初始化后调用）。
+    pub fn set_asset_manager(&mut self, mgr: Arc<Mutex<AssetManager>>) {
+        self.asset_manager = Some(mgr);
     }
 
     /// 处理窗口尺寸变化。
@@ -151,13 +304,51 @@ impl GameRenderer {
 
     // ─── 内部辅助方法 ──────────────────────────────────────────────────
 
-    /// 加载纹理（优先从缓存获取）。路径相对于项目根目录。
+    /// 加载纹理 — 优先通过 AssetManager（含 LRU 缓存），fallback 到直接文件加载。
+    ///
+    /// 路径相对于项目根目录（如 "assets/bg/classroom.png"）。
     fn load_texture(&mut self, path: &str) -> Option<&Texture> {
-        if !self.texture_cache.contains_key(path) {
-            let full_path = self.project_root.join(path);
-            let texture = Texture::from_file(&self.device, &self.queue, &full_path, None).ok()?;
-            self.texture_cache.insert(path.to_string(), texture);
+        // 步骤 1：本地缓存
+        if self.texture_cache.contains_key(path) {
+            return self.texture_cache.get(path);
         }
+
+        // 步骤 2：通过 AssetManager 加载（含 LRU 缓存）
+        if let Some(ref asset_mgr) = self.asset_manager {
+            let mut mgr = asset_mgr.lock().unwrap();
+            let path_std = std::path::Path::new(path);
+            if let Some(asset_id) = mgr.find_by_path(path_std)
+                && let Ok(cached) = mgr.load(asset_id)
+                && let aster_asset::LoadedAsset::Texture { size, .. } = &cached.data
+            {
+                let gpu_tex = match &cached.data {
+                    aster_asset::LoadedAsset::Texture { texture, .. } => texture,
+                    _ => unreachable!(),
+                };
+                let gpu_view = gpu_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                let tex = Texture::from_wgpu_texture(
+                    &self.device,
+                    gpu_tex.clone(),
+                    gpu_view,
+                    size.0,
+                    size.1,
+                    Some(path),
+                );
+                let hit_rate = mgr.stats().hit_rate() * 100.0;
+                log::debug!(
+                    "[GameRenderer] AssetManager: {} (命中率 {:.0}%)",
+                    path,
+                    hit_rate
+                );
+                self.texture_cache.insert(path.to_string(), tex);
+                return self.texture_cache.get(path);
+            }
+        }
+
+        // 步骤 3：直接文件加载（fallback）
+        let full_path = self.project_root.join(path);
+        let texture = Texture::from_file(&self.device, &self.queue, &full_path, None).ok()?;
+        self.texture_cache.insert(path.to_string(), texture);
         self.texture_cache.get(path)
     }
 
@@ -357,6 +548,54 @@ impl Renderer for GameRenderer {
             effect_type,
             params
         );
+    }
+
+    // ─── PH2-T08 新增方法 ────────────────────────────────────────────
+
+    fn capture_screenshot(&self) -> Result<Vec<u8>, String> {
+        // 渲染器内部的简单截图 — 依赖于外部（App）在渲染时提供 SurfaceTexture
+        // 实际截图由 GameRenderer::capture_from_surface() 完成，
+        // 此方法保留用于 MockRenderer 等无 GPU 场景。
+        Err("截图功能需在 App 层通过 capture_from_surface() 调用".into())
+    }
+
+    fn render_save_ui(&mut self, commands: &[aster_save::UiCommand]) {
+        self.save_ui_active = true;
+        // 将 UiCommand 列表格式化为可显示的文本
+        let mut text = String::new();
+        for cmd in commands {
+            match cmd {
+                aster_save::UiCommand::Overlay { .. } => {
+                    // 半透明遮罩 — Phase 2 仅文本渲染，跳过视觉遮罩
+                }
+                aster_save::UiCommand::Text {
+                    content, selected, ..
+                } => {
+                    if *selected {
+                        text.push_str("> ");
+                    } else {
+                        text.push_str("  ");
+                    }
+                    text.push_str(content);
+                    text.push('\n');
+                }
+                aster_save::UiCommand::Thumbnail { .. } => {
+                    // 缩略图 — Phase 2 跳过（无 UI 纹理渲染）
+                    text.push_str("  [缩略图]\n");
+                }
+                aster_save::UiCommand::ConfirmDialog { message, .. } => {
+                    text.push_str("  ╔══════════════════╗\n");
+                    text.push_str(&format!("  ║ {}\n", message));
+                    text.push_str("  ╚══════════════════╝\n");
+                }
+            }
+        }
+        self.save_ui_text = text;
+    }
+
+    fn clear_save_ui(&mut self) {
+        self.save_ui_active = false;
+        self.save_ui_text.clear();
     }
 }
 
