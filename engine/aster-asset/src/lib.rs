@@ -25,9 +25,10 @@
 //!
 //! | 模块 | 文件 | 说明 |
 //! |------|------|------|
-//! | `asset_manager` | `asset_manager.rs` | AssetManager：扫描/索引/查询/加载中枢 |
+//! | `asset_manager` | `asset_manager.rs` | AssetManager：扫描/索引/查询/加载中枢 + LRU 缓存 |
 //! | `loader` | `loader.rs` | AssetLoader trait + TextureLoader + AudioLoader |
 //! | `error` | `error.rs` | AssetError：NotFound/UnsupportedFormat/DecodeError/Io |
+//! | `cache` | `cache.rs` | CachedAsset + CacheStats + 内存估算（PH2-T05） |
 //!
 //! ## 使用示例
 //!
@@ -48,10 +49,12 @@
 
 // 模块声明
 pub mod asset_manager;
+pub mod cache;
 pub mod error;
 pub mod loader;
 
 // 重导出所有公开类型，方便外部 crate 通过 `aster_asset::TypeName` 直接引用
 pub use asset_manager::{AssetManager, AssetMetadata};
+pub use cache::{CacheStats, CachedAsset};
 pub use error::AssetError;
 pub use loader::{AssetLoader, AudioLoader, LoadedAsset, TextureLoader};
