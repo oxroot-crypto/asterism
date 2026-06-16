@@ -53,6 +53,7 @@ image = "0.25"
 bytemuck = { version = "1", features = ["derive"] }
 kira = "0.12"
 symphonia = { version = "0.5", features = ["all"] }
+lru = "0.14"
 
 # ============================================================
 # 编译配置文件

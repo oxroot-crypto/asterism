@@ -16,14 +16,14 @@
 | PH2-T01 | aster-audio — BGM 播放系统（crate 初始化 + kira 集成 + 循环/音量） | P0 | 6h | 无 | [x] |
 | PH2-T02 | aster-audio — SE 播放 + 多通道混音（BGM/SE 独立通道） | P0 | 4h | PH2-T01 | [x] |
 | PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [x] |
-| PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [ ] |
+| PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [x] |
 | PH2-T05 | aster-asset — LRU 缓存策略（淘汰机制 + 命中率统计） | P0 | 4h | PH2-T04 | [ ] |
 | PH2-T06 | aster-save — SaveData 数据结构 + 序列化 + CRC32 完整性校验 | P0 | 6h | 无 | [x] |
 | PH2-T07 | aster-save — 槽位管理 + 缩略图捕获 + 基础存档 UI | P0 | 6h | PH2-T06 | [x] |
 | PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 5 | 进行中: 0 | 待开始: 4
+**统计**：总计 9 个任务 | 已完成: 6 | 进行中: 0 | 待开始: 3
 
 ---
 
@@ -517,7 +517,7 @@ graph TD
 | **对应需求** | REQ-ENG-011 — 背景图片渲染（资源加载部分）：加载并显示背景图片（PNG/WebP），自动缩放适配窗口分辨率 |
 | **对应架构模块** | `aster-asset`（参考 Architecture.md 4.9 节 — 资源管理） |
 | **前置依赖** | 无（`aster-asset` crate 存根已存在于 workspace，可直接开始） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -657,44 +657,82 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-16 23:00
+- 实际工时：3 小时
+- AI 自验证结果：✅ AC01-AC08 全部通过（34 单元测试 + 2 文档测试，0 失败）
+- 人工测试结果：✅ MV01/MV02 确认通过（端到端验证依赖 PH2-T05/PH2-T08 集成）
+- 备注：`supported_types()` 返回 `&[AssetType]` 切片（非任务说明中的单个 `AssetType`），使 TextureLoader 可同时支持 Background/CharacterSprite/GuiElement。`register_loader` 使用 `Arc<dyn AssetLoader>` 而非 `Box`。AudioLoader 使用 symphonia 直接解码 PCM f32 而非通过 kira，保持 crate 间接口解耦。
 
 **上下文交接**：
 - 关键决策：
-  - `AssetLoader` 使用 trait 对象（`Box<dyn AssetLoader>`）实现可扩展的资源类型加载——未来添加视频加载器（Phase 6）只需新增 loader 实现，无需修改 AssetManager
-  - `TextureLoader` 通过构造函数注入 `Arc<wgpu::Device>` 和 `Arc<wgpu::Queue>`，而非持有全局 GPU 状态——这使得 AssetManager 可以在 wgpu 初始化之前创建，在 wgpu 就绪后再注册 TextureLoader
-  - `AssetManager` 的 `base_path` 为项目根目录（而非 `assets/`），便于后续访问 `scripts/`、`gui/`、`fonts/` 等目录
-  - 音频解码为 PCM f32 而非直接创建 kira `StaticSoundData`——保留音频数据为原始格式，由 AudioSystem 自行封装，保持 crate 间接口解耦
+  - `AssetLoader::supported_types()` 返回 `&[AssetType]` 切片（非单个类型）——TextureLoader 可同时处理 Background/CharacterSprite/GuiElement，避免代码重复。与任务说明中的 `fn supported_type(&self) -> AssetType` 有所偏离，但更符合"可扩展加载器"的设计意图
+  - `register_loader()` 接受 `Arc<dyn AssetLoader>`（非 `Box`）——同一加载器实例需注册到多个 AssetType，Arc 共享所有权
+  - `TextureLoader` 通过构造函数注入 `Arc<wgpu::Device>` + `Arc<wgpu::Queue>`——不在 crate 中创建 wgpu 实例，保持与渲染器的解耦
+  - 音频解码使用 symphonia 直接输出 PCM f32（非 kira StaticSoundData）——保留原始音频数据，aster-audio 自行封装，避免 aster-asset 依赖 kira
+  - `AssetMetadata` 独立于 `aster_core::Asset`——更精简（无 `metadata: HashMap<String, String>`），仅含扫描器可自动获取的信息
+  - 扫描按 `assets/{bg,char,bgm,se,voice,font,video,gui}` 子目录遍历，子目录名决定 AssetType（`AssetType::dir_name()` 反向映射）
+  - ID 从 1 开始自增分配（非分段 ID 号段），分段策略留待后续需要按 ID 推断类型时再实现
+  - `scan_assets()` 幂等——重复扫描不重复添加已索引文件
+  - 测试用 WAV 程序化生成（440Hz 正弦波），无需外部测试数据
 - 新增接口：
   ```rust
-  pub struct AssetManager { /* ... */ }
+  // aster-asset 公开导出
+  pub struct AssetManager { /* base_path, assets, path_to_id, loaders, next_id */ }
   impl AssetManager {
-      pub fn new(base_path: PathBuf) -> Self;
+      pub fn new(base_path: impl Into<PathBuf>) -> Self;
       pub fn scan_assets(&mut self) -> Result<usize, AssetError>;
-      pub fn register_loader(&mut self, loader: Box<dyn AssetLoader>);
-      pub fn load(&self, id: AssetId, /* wgpu device/queue refs */) -> Result<LoadedAsset, AssetError>;
+      pub fn register_loader(&mut self, loader: Arc<dyn AssetLoader>);
+      pub fn load(&self, id: AssetId) -> Result<LoadedAsset, AssetError>;
       pub fn get_metadata(&self, id: AssetId) -> Option<&AssetMetadata>;
       pub fn find_by_path(&self, path: &Path) -> Option<AssetId>;
+      pub fn resolve_path(&self, id: AssetId) -> Option<PathBuf>;
       pub fn assets(&self) -> impl Iterator<Item = &AssetMetadata>;
+      pub fn asset_count(&self) -> usize;
+      pub fn base_path(&self) -> &Path;
   }
-  
+
   pub trait AssetLoader: Send + Sync {
-      fn supported_type(&self) -> AssetType;
-      fn load(&self, path: &Path, /* device, queue */) -> Result<LoadedAsset, AssetError>;
+      fn supported_types(&self) -> &[AssetType];
+      fn load(&self, path: &Path) -> Result<LoadedAsset, AssetError>;
   }
-  
-  pub enum LoadedAsset { Texture { .. }, AudioData { .. }, Bytes { .. } }
-  pub struct AssetMetadata { pub id: AssetId, pub asset_type: AssetType, pub relative_path: PathBuf, pub file_size: u64 }
+
+  pub struct TextureLoader { /* device: Arc<Device>, queue: Arc<Queue> */ }
+  impl TextureLoader {
+      pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self;
+      pub fn from_bytes(&self, bytes: &[u8], label: Option<&str>) -> Result<LoadedAsset, AssetError>;
+  }
+
+  pub struct AudioLoader;
+  impl AudioLoader { pub fn new() -> Self; }
+
+  pub enum LoadedAsset {
+      Texture { texture: wgpu::Texture, view: wgpu::TextureView, size: (u32, u32) },
+      AudioData { samples: Vec<f32>, sample_rate: u32, channels: u16 },
+      Bytes { data: Vec<u8> },
+  }
+
+  pub struct AssetMetadata {
+      pub id: AssetId, pub asset_type: AssetType,
+      pub relative_path: PathBuf, pub file_size: u64,
+  }
+
+  pub enum AssetError {
+      NotFound { path: String }, UnsupportedFormat { path: String, format: String },
+      DecodeError { reason: String }, Io(#[from] std::io::Error),
+  }
   ```
 - 已知限制：
-  - 不支持运行时新增/删除资源文件后的自动重新扫描（需手动调用 `scan_assets()`）
-  - 不校验文件内容魔数（如 PNG 文件头 `\x89PNG`），仅通过扩展名判断类型
-  - symlink 不跟随（使用 `std::fs::metadata` 不跟随符号链接）
-- 建议下一个任务先读取：`engine/aster-asset/src/asset_manager.rs`、`engine/aster-asset/src/loader.rs`
+  - `scan_assets()` 仅在 `assets/` 直接子目录搜索（不递归），嵌套目录被跳过
+  - 不支持运行时自动重扫描（需手动调用 `scan_assets()`）
+  - 不校验文件内容魔数，仅通过扩展名 + 子目录判断类型
+  - symlink 不跟随
+  - 无文件删除的清理机制（多次扫描幂等但不会移除已删除文件条目）
+  - 无 LRU 缓存（PH2-T05）——每次 `load()` 重新解码
+  - `LoadedAsset` 不实现 `Clone`（wgpu Texture 不可克隆），手动 `Debug` 仅输出尺寸
+- 建议下一个任务（PH2-T05）先读取：
+  - `engine/aster-asset/src/asset_manager.rs` — 需修改 `load()` 添加缓存层
+  - `engine/aster-asset/src/loader.rs` — `LoadedAsset` 枚举，缓存层需估算内存占用
+
 ### PH2-T05 — aster-asset LRU 缓存策略（淘汰机制 + 命中率统计）
 
 | 属性 | 内容 |

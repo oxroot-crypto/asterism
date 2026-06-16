@@ -1,32 +1,57 @@
 //! Asterism — Galgame/ADV 游戏引擎
 //!
 //! 文件路径：engine/aster-asset/src/lib.rs
-//! 功能概述：资源管理 — 统一管理游戏资源的加载、缓存和生命周期。
-//!           支持资源类型：图片（PNG/WebP/JPEG）、音频（OGG/WAV）、
-//!           字体（TTF/OTF）、脚本（.aster/.asterbyte）。
-//!           提供异步预加载 API，避免运行时卡顿。
+//! 功能概述：资源管理 crate — 统一管理游戏资源的加载、索引和生命周期。
+//!           提供 `AssetManager`（资源索引/扫描/加载中枢）、
+//!           `AssetLoader` trait（可扩展的资源加载接口）、
+//!           `TextureLoader`（PNG/WebP→GPU 纹理）和
+//!           `AudioLoader`（OGG/FLAC/MP3/WAV→PCM 样本）。
+//!           本 crate 是 PH2-T04 的核心交付物，为 PH2-T05（LRU 缓存）
+//!           和 PH2-T08（运行时集成）提供基础设施。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-12
-//! 最后修改：2026-06-12
+//! 最后修改：2026-06-16
 //!
 //! 依赖模块：
-//! - aster_core（待 Phase 1 添加）：AssetId、资源类型定义
-//! - lru（待 Phase 2 添加）：纹理缓存淘汰
+//! - aster_core（AssetId、AssetType 核心资源类型）
+//! - wgpu（GPU 纹理创建）
+//! - image（PNG/WebP/JPEG 图片解码）
+//! - symphonia（OGG/FLAC/MP3/WAV 音频解码）
+//! - lru（LRU 缓存，PH2-T05 使用）
 //!
 //! 架构位置：aster-core ← aster-asset
+//!
+//! ## 模块概览
+//!
+//! | 模块 | 文件 | 说明 |
+//! |------|------|------|
+//! | `asset_manager` | `asset_manager.rs` | AssetManager：扫描/索引/查询/加载中枢 |
+//! | `loader` | `loader.rs` | AssetLoader trait + TextureLoader + AudioLoader |
+//! | `error` | `error.rs` | AssetError：NotFound/UnsupportedFormat/DecodeError/Io |
+//!
+//! ## 使用示例
+//!
+//! ```rust,ignore
+//! use aster_asset::{AssetManager, TextureLoader, AudioLoader, AssetError};
+//! use std::sync::Arc;
+//!
+//! fn init_assets(project_root: &str, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>)
+//!     -> Result<AssetManager, AssetError>
+//! {
+//!     let mut manager = AssetManager::new(project_root);
+//!     manager.scan_assets()?;
+//!     manager.register_loader(Arc::new(TextureLoader::new(device, queue)));
+//!     manager.register_loader(Arc::new(AudioLoader::new()));
+//!     Ok(manager)
+//! }
+//! ```
 
-/// 资源管理 — 待 Phase 1 实现
-///
-/// 将定义：
-/// - `AssetManager`：资源加载/缓存主结构
-/// - `AssetLoader` trait：可扩展的资源加载器接口
-/// - `AssetCache`：LRU 缓存（纹理 256MB、音频 128MB）
-/// - `AssetType`：Background/CharacterSprite/Audio/Voice/Font/Script 枚举
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        // Phase 0 占位测试，Phase 1 实际开发时替换为资源加载测试
-        assert_eq!(2 + 2, 4);
-    }
-}
+// 模块声明
+pub mod asset_manager;
+pub mod error;
+pub mod loader;
+
+// 重导出所有公开类型，方便外部 crate 通过 `aster_asset::TypeName` 直接引用
+pub use asset_manager::{AssetManager, AssetMetadata};
+pub use error::AssetError;
+pub use loader::{AssetLoader, AudioLoader, LoadedAsset, TextureLoader};
