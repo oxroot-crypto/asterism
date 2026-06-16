@@ -275,6 +275,8 @@ dependencies = [
 name = "aster-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "rmp-serde",
  "serde",
  "serde_json",
  "toml 0.8.23",
@@ -348,6 +350,14 @@ dependencies = [
 [[package]]
 name = "aster-save"
 version = "0.1.0"
+dependencies = [
+ "aster-core",
+ "chrono",
+ "crc32fast",
+ "rmp-serde",
+ "serde",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "aster-ui"
@@ -779,8 +789,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -4409,6 +4421,25 @@ name = "rgb"
 version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+
+[[package]]
+name = "rmp"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ba8be72d372b2c9b35542551678538b562e7cf86c3315773cae48dfbfe7790c"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "rmp-serde"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72f81bee8c8ef9b577d1681a70ebbc962c232461e397b22c208c43c04b67a155"
+dependencies = [
+ "rmp",
+ "serde",
+]
 
 [[package]]
 name = "roxmltree"

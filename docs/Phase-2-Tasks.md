@@ -18,12 +18,12 @@
 | PH2-T03 | aster-audio — fade_in/fade_out + 音频状态快照 | P0 | 4h | PH2-T02 | [x] |
 | PH2-T04 | aster-asset — 资源加载基础设施（crate 初始化 + AssetManager + 纹理/音频解码） | P0 | 8h | 无 | [ ] |
 | PH2-T05 | aster-asset — LRU 缓存策略（淘汰机制 + 命中率统计） | P0 | 4h | PH2-T04 | [ ] |
-| PH2-T06 | aster-save — SaveData 数据结构 + 序列化 + CRC32 完整性校验 | P0 | 6h | 无 | [ ] |
+| PH2-T06 | aster-save — SaveData 数据结构 + 序列化 + CRC32 完整性校验 | P0 | 6h | 无 | [x] |
 | PH2-T07 | aster-save — 槽位管理 + 缩略图捕获 + 基础存档 UI | P0 | 6h | PH2-T06 | [ ] |
 | PH2-T08 | 运行时集成 — 音频/资源/存档接入 SceneManager + App 主循环 | P0 | 8h | PH2-T03, PH2-T05, PH2-T07 | [ ] |
 | PH2-T09 | 集成测试 — 基础流程 + 异常路径 + 性能验证 | P0 | 10h | PH2-T08 | [ ] |
 
-**统计**：总计 9 个任务 | 已完成: 3 | 进行中: 0 | 待开始: 6
+**统计**：总计 9 个任务 | 已完成: 4 | 进行中: 0 | 待开始: 5
 
 ---
 
@@ -879,7 +879,7 @@ graph TD
 | **对应需求** | REQ-ENG-040 — 游戏存档：保存当前游戏状态到磁盘文件；REQ-ENG-041 — 游戏读档：从存档文件恢复游戏状态；NFR-SEC-003 — 存档完整性：CRC32 校验和 |
 | **对应架构模块** | `aster-save`（参考 Architecture.md 4.10 节 — 存档系统）+ `aster-core`（SaveData 类型，参考 4.2 节） |
 | **前置依赖** | 无（`aster-core` 中 `VariableStore` / `FlagSet` 已完整实现且支持 serde，`AudioSnapshot` 在 PH2-T03 中定义） |
-| **状态** | [ ] 未完成 |
+| **状态** | [x] 已完成 |
 
 #### 任务说明
 
@@ -1073,47 +1073,54 @@ graph TD
 ---
 
 **完成记录**：
-- 完成时间：*（待填写）*
-- 实际工时：*（待填写）*
-- AI 自验证结果：*（待填写）*
-- 人工测试结果：*（待填写）*
-- 备注：*（待填写）*
+- 完成时间：2026-06-16 15:30
+- 实际工时：2.5 小时
+- AI 自验证结果：✅ AC01-AC09 全部通过（13 单元测试 + 17 单元测试 + 2 文档测试 = 32 测试，0 失败）
+- 人工测试结果：✅ MV01-MV03 全部通过（端到端验证依赖 PH2-T07/PH2-T08 集成）
+- 备注：AudioSnapshot 定义在 aster-core::save 中（与 aster-audio::AudioSnapshot 暂时重复，PH2-T08 统一）。SaveError 的 Serialize/Deserialize 变体使用 String 而非 #[from]（rmp_serde error 不实现 std::error::Error）。测试使用临时目录隔离，不影响实际存档数据。
 
 **上下文交接**：
 - 关键决策：
-  - `AudioSnapshot` 和 `RenderState` 定义在 `aster-core::save` 模块中而非各自的 crate，避免 `aster-core` 反向依赖 `aster-audio` / `aster-renderer`（违反分层架构）
+  - `AudioSnapshot` 和 `RenderState` 定义在 `aster-core::save` 模块中而非各自的 crate，避免 `aster-core` 反向依赖 `aster-audio` / `aster-renderer`（违反分层架构）。PH2-T08 集成时 `aster-audio` 可直接 re-export `aster_core::save::AudioSnapshot`
   - 存档文件格式为 `[CRC32 u32 LE] + [MessagePack]`，简洁紧凑，CRC32 放在文件头部方便快速校验
   - SaveData 不包含缩略图 `Vec<u8>` 字段——缩略图作为独立 `.png` 文件存储（如 `slot_00_thumb.png`），避免 PNG 数据膨胀存档文件影响序列化性能
   - 版本号（`version: u32`）从 1 开始，后续引擎升级时递增。迁移函数注册表（`SAVE_MIGRATIONS: BTreeMap<u32, MigrationFn>`）在 Architecture.md 中定义，本任务仅实现版本检测框架
+  - `rmp_serde::encode::Error` / `rmp_serde::decode::Error` 不实现 `std::error::Error`，因此 SaveError 使用 `Serialize(String)` / `Deserialize(String)` 变体手动映射
+  - 槽位常量（`MANUAL_SLOT_COUNT`、`QUICK_SLOT`、`AUTO_SLOT`、`CURRENT_VERSION`）定义为模块级 `const` 而非 SaveManager 的关联常量——便于 PH2-T07 UI 直接引用
 - 新增接口：
   ```rust
   // aster-core 新增
-  pub struct SaveData { /* 见实现要点 */ }
-  pub struct VmSnapshot { /* ... */ }
-  pub struct RenderState { /* ... */ }
-  pub struct SpriteState { /* ... */ }
-  pub struct SaveSlotInfo { /* ... */ }
-  pub struct AudioSnapshot { /* ... */ }  // 定义在 aster-core，aster-audio 通过依赖使用
+  pub struct SaveData { pub version, slot, timestamp, scene_id, label, vm_snapshot, variables, flags, audio_state, render_state }
+  pub struct VmSnapshot { pub pc, registers: [Value; 16], call_stack_depth, stack_len }
+  pub struct RenderState { pub current_bg, displayed_sprites: Vec<SpriteState> }
+  pub struct SpriteState { pub sprite_path, position, alpha, emotion }
+  pub struct SaveSlotInfo { pub slot, timestamp, scene_id, has_thumbnail }
+  pub struct AudioSnapshot { pub current_bgm_path, bgm_position_secs, bgm_looping, bgm_volume, se_volume }  // 定义在 aster-core，aster-audio 通过依赖使用
+  impl SaveData { pub fn new(slot, scene_id) -> Self; pub fn to_slot_info() -> SaveSlotInfo; pub const CURRENT_VERSION: u32 }
   
   // aster-save 新增
-  pub struct SaveManager { /* ... */ }
+  pub const MANUAL_SLOT_COUNT: u8 = 5; pub const QUICK_SLOT: u8 = 98; pub const AUTO_SLOT: u8 = 99; pub const CURRENT_VERSION: u32 = 1;
+  pub struct SaveManager { /* save_dir */ }
   impl SaveManager {
       pub fn new(save_dir: PathBuf) -> Self;
       pub fn save(&self, slot: u8, data: &SaveData) -> Result<SaveSlotInfo, SaveError>;
       pub fn load(&self, slot: u8) -> Result<SaveData, SaveError>;
       pub fn list_saves(&self) -> Result<Vec<SaveSlotInfo>, SaveError>;
       pub fn delete_save(&self, slot: u8) -> Result<(), SaveError>;
+      pub fn slot_exists(&self, slot: u8) -> bool;
       pub fn save_dir(&self) -> &Path;
       pub fn slot_path(&self, slot: u8) -> PathBuf;
+      pub fn thumbnail_path(&self, slot: u8) -> PathBuf;
   }
   
-  pub enum SaveError { DirectoryNotFound, Io, Serialize, Deserialize, Corrupted, IncompatibleVersion, EmptySlot }
+  pub enum SaveError { Io(#[from] std::io::Error), Serialize(String), Deserialize(String), Corrupted { slot, reason }, IncompatibleVersion { found, expected, hint }, EmptySlot { slot } }
   ```
 - 已知限制：
   - `VmSnapshot` 当前仅保存 PC 和寄存器状态，不含完整的 `call_stack` 的中文变量名（子例程调用点）——后续如需要调试器功能，需扩展 VmSnapshot 字段
   - `RenderState` 的 `displayed_sprites` 列表不包含打字机文本进度——存档恢复后文本从头显示（非精确到字符）
   - MessagePack 序列化不压缩——大型游戏的存档可能达到 1-5MB（主要来自 VariableStore 中的数组/映射数据）
   - `list_saves()` 完整反序列化每个文件，在 30 槽位全部占用时可能耗时 ~100ms——当前 7 槽位场景下无感知
+  - `aster-core` 中新增了 `AudioSnapshot` 与 `aster-audio::AudioSnapshot` 暂时重复，PH2-T08 集成时需统一
 - 建议下一个任务先读取：`engine/aster-core/src/save.rs`、`engine/aster-save/src/save_manager.rs`
 ### PH2-T07 — aster-save 槽位管理 + 缩略图捕获 + 基础存档 UI
 
