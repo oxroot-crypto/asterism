@@ -124,4 +124,55 @@ scene "prologue" {
             goto "chapter1/library"
         }
     }
+
+    -- ==================================================================
+    -- §23 StopMusic — 停止背景音乐
+    --      对应 Rust: SceneNode::StopMusic { fade_out?: Expr }
+    --      fade_out 支持字面量 / 变量 / 表达式
+    -- ==================================================================
+
+    label "goto_demo"
+
+    -- 23a) 字面量淡出时间
+    stop_music fade_out: 1.5
+
+    -- 23b) 无淡出（立即停止）
+    -- stop_music
+
+    wait 2.0
+
+    -- 恢复音乐
+    music "bgm_daily_life" fade_in: 1.0
+
+    -- ==================================================================
+    -- §24 Goto — 跨场景跳转
+    --      对应 Rust: SceneNode::Goto { scene_id: Expr, label?: Expr }
+    --      scene_id / label 均支持变量（动态场景跳转）
+    --      与 Jump 区别：Jump 场景内，Goto 跨场景
+    -- ==================================================================
+
+    narration "跨场景跳转（Goto）演示——"
+
+    -- 24a) 字面量 scene_id（从目标场景开头开始）
+    -- 实际项目中取消注释以启用：
+    -- goto "chapter1/sakura_road"
+
+    -- 24b) 字面量 scene_id + 指定起始标签
+    -- goto "chapter1/sakura_road" label: "main_flow"
+
+    -- 24c) 变量 scene_id + 变量 label（computed goto，§0 中已定义）
+    -- goto $next_scene label: $next_label
+
+    narration "Goto 会跳转到另一个 .aster 场景文件。"
+    narration "取消上面 goto 语句的注释即可测试跨场景跳转。"
+
+    -- ==================================================================
+    -- §25 演示完毕
+    --      SceneNode 25 变体全部覆盖 ✓
+    --      Expr 7 种变体 + 14 种运算符全部覆盖 ✓
+    --      场景执行完毕，自动返回标题画面
+    -- ==================================================================
+
+    narration "—— SceneNode 25 变体 + Expr 插值完整演示结束 ——"
+    narration "感谢使用 Asterism（群星）引擎！"
 }
