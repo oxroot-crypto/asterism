@@ -6,5 +6,27 @@ license.workspace = true
 description = "资源管理 — 资源加载/缓存/生命周期管理，支持异步预加载"
 
 [dependencies]
-# Phase 1 将添加 aster-core（workspace 内部依赖）
-# Phase 2 将添加 lru、image 等资源处理依赖
+# Workspace 内部依赖
+aster-core = { workspace = true }
+
+# 图片解码（PNG/WebP/JPEG → RGBA8 像素缓冲）
+image = { workspace = true }
+
+# 音频解码（OGG/FLAC/MP3/WAV → PCM f32 采样）
+symphonia = { workspace = true }
+
+# GPU 纹理创建（图片解码后上传至显存）
+wgpu = { workspace = true }
+
+# 错误类型派生
+thiserror = { workspace = true }
+
+# LRU 缓存（PH2-T05 使用，提前声明以统一依赖管理）
+lru = { workspace = true }
+
+[dev-dependencies]
+# 测试用临时目录/文件
+tempfile = "3"
+
+# 异步轮询（wgpu headless 设备创建，用于纹理加载测试）
+pollster = { workspace = true }

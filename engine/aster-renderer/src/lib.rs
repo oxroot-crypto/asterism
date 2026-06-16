@@ -31,6 +31,7 @@
 
 pub mod background_layer;
 pub mod config;
+pub mod frame_capture;
 pub mod gpu_context;
 pub mod layer_manager;
 pub mod sprite_layer;

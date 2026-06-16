@@ -36,4 +36,9 @@ Thumbs.db
 *.tmp
 *.temp
 
+# ── Asterism save模块 测试文件 ───────────────────────────────────────
+engine/aster-save/my_saves/**/*
+engine/aster-save/test_saves/**/*
+engine/aster-save/saves/**/*
 
+templates/default_project/save/

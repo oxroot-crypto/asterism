@@ -6,4 +6,12 @@ license.workspace = true
 description = "音频系统 — BGM/BGS/SE/Voice 播放、混音、淡入淡出"
 
 [dependencies]
-# Phase 4 将添加 rodio、aster-core、aster-asset（workspace 内部依赖）
+aster-core = { workspace = true }
+kira = { workspace = true }
+serde = { workspace = true }
+symphonia = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"

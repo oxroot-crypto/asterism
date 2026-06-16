@@ -37,6 +37,7 @@ pub mod build_config;
 pub mod character;
 pub mod expr;
 pub mod game;
+pub mod save;
 pub mod scene;
 pub mod variable;
 
@@ -46,5 +47,8 @@ pub use build_config::{ArchiveConfig, BuildConfig, CompileConfig, GlobPatterns};
 pub use character::{Character, VoiceConfig};
 pub use expr::{BinaryOp, Expr, UnaryOp};
 pub use game::{Game, GameSettings, Resolution, TextSpeed};
+pub use save::{
+    AudioSnapshot, CallFrameSnapshot, RenderState, SaveData, SaveSlotInfo, SpriteState, VmSnapshot,
+};
 pub use scene::{Choice, Position, Scene, SceneNode, TransitionSpec};
 pub use variable::{FlagSet, Value, VariableStore};

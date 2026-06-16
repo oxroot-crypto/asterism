@@ -5,23 +5,29 @@
 //!           协调 VM 和 Renderer 的交互。renderer 以参数形式传入 update/select_choice。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-15
-//! 最后修改：2026-06-15
+//! 最后修改：2026-06-16
 //!
 //! 依赖模块：
-//! - aster_core（TextSpeed 速度类型）
-//! - aster_renderer（TypewriterSpeed 打字机速度）
+//! - aster_core（TextSpeed / SaveData / VmSnapshot / AudioSnapshot / RenderState 等存档类型）
+//! - aster_save（SaveManager / SaveUi / SaveUiMode / UiAction / SaveUiResult / SaveSlotInfo）
+//! - aster_asset（AssetManager）
 //! - aster_vm（Vm / VmAction / EngineCommand / MenuChoiceData）
-//! - crate::command_bridge（Renderer trait + dispatch）
+//! - crate::command_bridge（Renderer trait + AudioSystem trait + dispatch）
 //! - crate::dialogue_controller（DialogueController / DialogueAction / DialogueLine）
 //! - crate::game_context::GameContext
 //! - crate::error::RuntimeError
 //!
-//! 对应任务：PH1-T18 — 实现 SceneManager + Renderer trait 的真实实现
+//! 对应任务：PH1-T18 — 实现 SceneManager + Renderer trait 的真实实现；
+//!          PH2-T08 — 运行时集成（音频/资源/存档子系统接入）
 
+use std::sync::{Arc, Mutex};
+
+use aster_core::save::SaveData;
 use aster_renderer::TypewriterSpeed;
+use aster_save::{SaveManager, SaveUi, SaveUiMode, SaveUiResult, UiAction};
 use aster_vm::{EngineCommand, MenuChoiceData, Vm, VmAction};
 
-use crate::command_bridge::{self, Renderer};
+use crate::command_bridge::{self, AudioSystem, Renderer, resolve_audio_path};
 use crate::dialogue_controller::{DialogueAction, DialogueController, DialogueLine};
 use crate::error::RuntimeError;
 use crate::game_context::GameContext;
@@ -130,6 +136,20 @@ pub struct SceneManager {
     command_log: Vec<EngineCommand>,
     steps_this_update: usize,
     dialogue_controller: DialogueController,
+    // PH2-T08 新增: 子系统引用和存档状态
+    /// 音频系统（可选 — 通过 trait object 持有）
+    audio_system: Option<Box<dyn AudioSystem>>,
+    /// 资源管理器（可选 — Arc<Mutex> 用于跨子系统共享）
+    asset_manager: Option<Arc<Mutex<aster_asset::AssetManager>>>,
+    /// 存档管理器（通过 Arc 共享，SaveUi 也需要访问）
+    save_manager: Option<Arc<SaveManager>>,
+    /// 存档/读档 UI 状态机
+    save_ui: SaveUi,
+    /// 当前渲染状态（手动跟踪，用于存档时构造 RenderState）
+    render_state: aster_core::save::RenderState,
+    /// PH2-T08: 存档用的 PC（暂停时的指令位置，比 VM 当前 PC 早一条或多条指令）
+    /// 恢复时从此 PC 重放，让 VM 重新发出所有渲染命令
+    save_pc: usize,
 }
 
 impl SceneManager {
@@ -145,6 +165,13 @@ impl SceneManager {
             command_log: Vec::new(),
             steps_this_update: 0,
             dialogue_controller: DialogueController::new(text_speed),
+            // PH2-T08: 子系统默认未初始化，由 App 注入
+            audio_system: None,
+            asset_manager: None,
+            save_manager: None,
+            save_ui: SaveUi::new(),
+            render_state: aster_core::save::RenderState::default(),
+            save_pc: 0,
         }
     }
 
@@ -175,6 +202,359 @@ impl SceneManager {
     #[inline]
     pub fn menu_prompt(&self) -> Option<&str> {
         self.current_menu.as_ref().map(|m| m.prompt.as_str())
+    }
+
+    // ─── PH2-T08: 子系统注入 ──────────────────────────────────────────
+
+    /// 注入音频系统。
+    pub fn set_audio_system(&mut self, audio: Box<dyn AudioSystem>) {
+        self.audio_system = Some(audio);
+    }
+
+    /// 注入资源管理器。
+    pub fn set_asset_manager(&mut self, asset: Arc<Mutex<aster_asset::AssetManager>>) {
+        self.asset_manager = Some(asset);
+    }
+
+    /// 注入存档管理器。
+    pub fn set_save_manager(&mut self, save: Arc<SaveManager>) {
+        self.save_manager = Some(save);
+    }
+
+    /// 返回存档 UI 的不可变引用（供 App 判断是否打开）。
+    #[inline]
+    pub fn save_ui(&self) -> &SaveUi {
+        &self.save_ui
+    }
+
+    /// 通过 AssetManager 加载音频资源，返回 (samples, sample_rate, channels)。
+    ///
+    /// AssetManager 不可用或资源未找到时返回 None。
+    fn load_audio_through_asset_manager(&self, path: &str) -> Option<(Vec<f32>, u32, u16)> {
+        let mgr = self.asset_manager.as_ref()?;
+        // Mutex poison 恢复：若其他线程 panic 导致锁中毒，仍可安全取回内部数据。
+        // AssetManager 不变量由单线程（事件循环）保证，中毒不会破坏数据一致性。
+        let mut mgr = mgr.lock().unwrap_or_else(|poison| poison.into_inner());
+        let base_path = std::path::Path::new(path);
+
+        // 尝试在 AssetManager 中查找音频资源。
+        // resolve_audio_path 固定追加 .wav，但实际文件可能是 .mp3/.ogg/.flac。
+        // 因此按优先级尝试多种扩展名，适配创作者可能使用的任意格式。
+        let audio_extensions = ["wav", "mp3", "ogg", "flac"];
+        let mut asset_id = mgr.find_by_path(base_path);
+
+        if asset_id.is_none() {
+            // 原路径没找到，尝试替换扩展名
+            let stem = base_path.with_extension(""); // 去掉扩展名
+            for ext in &audio_extensions {
+                let try_path = stem.with_extension(ext);
+                if let Some(id) = mgr.find_by_path(&try_path) {
+                    asset_id = Some(id);
+                    break;
+                }
+            }
+        }
+
+        let asset_id = asset_id?;
+        let cached = match mgr.load(asset_id) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!(
+                    "[SceneManager] AssetManager load({}) 失败: {}",
+                    asset_id.0,
+                    e
+                );
+                return None;
+            }
+        };
+        if let aster_asset::LoadedAsset::AudioData {
+            ref samples,
+            sample_rate,
+            channels,
+        } = cached.data
+        {
+            Some((samples.clone(), sample_rate, channels))
+        } else {
+            None
+        }
+    }
+
+    // ─── PH2-T08: 存档/读档菜单 ───────────────────────────────────────
+
+    /// 打���存档菜单。
+    ///
+    /// 从 `save_manager` 获取槽位列表，构建 `SlotDisplayInfo` 并打开 SaveUi。
+    pub fn enter_save_menu(&mut self) -> Result<(), RuntimeError> {
+        let save_mgr = self
+            .save_manager
+            .as_ref()
+            .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+        let slot_infos = save_mgr
+            .list_saves()
+            .map_err(|e| RuntimeError::SaveError(format!("获取存档列表失败: {}", e)))?;
+        self.save_ui.open(SaveUiMode::Save, &slot_infos);
+        self.state = SceneState::Paused;
+        Ok(())
+    }
+
+    /// 打开读档菜单。
+    pub fn enter_load_menu(&mut self) -> Result<(), RuntimeError> {
+        let save_mgr = self
+            .save_manager
+            .as_ref()
+            .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+        let slot_infos = save_mgr
+            .list_saves()
+            .map_err(|e| RuntimeError::SaveError(format!("获取存档列表失败: {}", e)))?;
+        self.save_ui.open(SaveUiMode::Load, &slot_infos);
+        self.state = SceneState::Paused;
+        Ok(())
+    }
+
+    /// 关闭存档/读档 UI。
+    pub fn close_save_ui(&mut self) {
+        self.save_ui.close();
+        if self.state == SceneState::Paused {
+            self.state = SceneState::Playing;
+        }
+    }
+
+    /// 设置存档/读档 UI 为错误提示状态。
+    ///
+    /// 在错误状态下，SaveUi 渲染红色错误文本 + "按任意键返回"提示。
+    /// 用户按任意键后 UI 返回槽位列表（而非退出整个 UI）。
+    ///
+    /// # 参数
+    /// - `message`：向用户展示的错误描述（中文）
+    /// - `mode`：当前操作模式（存档/读档），用于从错误状态返回列表
+    pub fn set_save_ui_error(&mut self, message: &str, mode: SaveUiMode) {
+        // 从 save_manager 获取最新的槽位列表，确保返回列表时数据是最新的
+        let slots = self
+            .save_manager
+            .as_ref()
+            .and_then(|mgr| mgr.list_saves().ok())
+            .map(|infos| SaveUi::build_slot_list(&infos))
+            .unwrap_or_default();
+        self.save_ui.set_error(message.to_string(), mode, slots);
+    }
+
+    /// 检查存档/读档 UI 是否可见。
+    #[inline]
+    pub fn is_save_ui_open(&self) -> bool {
+        self.save_ui.is_open()
+    }
+
+    /// 处理存档/读档 UI 中的用户输入。
+    ///
+    /// 驱动 SaveUi 状态机，根据返回的 `SaveUiResult` 执行实际的
+    /// 存档/读档/删除操作。
+    ///
+    /// # 参数
+    /// - `action`: 用户输入（Up/Down/Confirm/Cancel/Delete）
+    ///
+    /// # 返回值
+    /// - `Ok(true)`: 执行了读档（App 需要处理状态恢复和 UI 关闭）
+    /// - `Ok(false)`: 执行了存档/删除/取消（UI 可能仍然打开）
+    /// - `Err`: 操作失败
+    pub fn handle_save_ui_input(
+        &mut self,
+        action: UiAction,
+        mode: SaveUiMode,
+        renderer: &mut Option<&mut dyn Renderer>,
+    ) -> Result<bool, RuntimeError> {
+        let result = self.save_ui.handle_input(action);
+        match result {
+            SaveUiResult::None => {}
+            SaveUiResult::SaveRequested { slot } => {
+                // 收集游戏状态 → 保存
+                let save_data = self.collect_game_state(slot);
+                let save_mgr = self
+                    .save_manager
+                    .as_ref()
+                    .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+                save_mgr
+                    .save(slot, &save_data)
+                    .map_err(|e| RuntimeError::SaveError(format!("存档失败: {}", e)))?;
+                // 保存后刷新槽位列表（新建/覆盖后槽位状态改变）
+                self.refresh_save_ui_slots(mode)?;
+            }
+            SaveUiResult::LoadRequested { slot } => {
+                let save_mgr = self
+                    .save_manager
+                    .as_ref()
+                    .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+                let save_data = save_mgr
+                    .load(slot)
+                    .map_err(|e| RuntimeError::SaveError(format!("读档失败: {}", e)))?;
+                self.restore_game_state(&save_data, renderer)?;
+                self.close_save_ui();
+                return Ok(true); // 读档成功
+            }
+            SaveUiResult::DeleteRequested { slot } => {
+                let save_mgr = self
+                    .save_manager
+                    .as_ref()
+                    .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+                save_mgr
+                    .delete_save(slot)
+                    .map_err(|e| RuntimeError::SaveError(format!("删除存档失败: {}", e)))?;
+                // 删除后刷新槽位列表
+                self.refresh_save_ui_slots(mode)?;
+            }
+            SaveUiResult::Closed => {
+                self.close_save_ui();
+            }
+        }
+        Ok(false)
+    }
+
+    /// 从 save_manager 重新获取槽位列表并刷新 SaveUi。
+    ///
+    /// SaveRequested / DeleteRequested 操作成功后调用此方法，
+    /// 确保 UI 展示的槽位信息是最新的（消除各操作分支中的重复刷新逻辑）。
+    fn refresh_save_ui_slots(&mut self, mode: SaveUiMode) -> Result<(), RuntimeError> {
+        let save_mgr = self
+            .save_manager
+            .as_ref()
+            .ok_or_else(|| RuntimeError::SaveError("存档管理器未初始化".into()))?;
+        let slot_infos = save_mgr
+            .list_saves()
+            .map_err(|e| RuntimeError::SaveError(format!("获取存档列表失败: {}", e)))?;
+        self.save_ui.open(mode, &slot_infos);
+        Ok(())
+    }
+
+    // ─── PH2-T08: 游戏状态收集与恢复 ──────────────────────────────────
+
+    /// 收集当前游戏完整状态，构造 `SaveData`。
+    ///
+    /// 从 VM、AudioSystem、RenderState 收集所有运行时状态。
+    ///
+    /// # 参数
+    /// - `slot`: 目标槽位编号
+    pub fn collect_game_state(&self, slot: u8) -> SaveData {
+        let scene_id = self.current_scene_id.clone().unwrap_or_else(|| {
+            // 防御性日志：正常流程中 collect_game_state 不应在场景加载前被调用。
+            // 若通过快速存档（F5）等异步路径在异常时机触发，记录警告以便排查。
+            log::warn!("[SceneManager] collect_game_state: current_scene_id 为 None，存档 scene_id 将为空字符串");
+            String::new()
+        });
+
+        let mut save_data = SaveData::new(slot, &scene_id);
+        // 使用 save_pc 而非 vm.pc() — save_pc 指向暂停前的指令，
+        // 恢复时 VM 从此 PC 重放，会重新发出 SetBg/ShowChar/SetDialogue 等渲染命令
+        let mut vm_snap = self.vm.to_snapshot();
+        vm_snap.pc = self.save_pc;
+        save_data.vm_snapshot = vm_snap;
+        save_data.variables = self.vm.variables().clone();
+        save_data.flags = self.vm.flags().clone();
+        save_data.render_state = self.render_state.clone();
+
+        // 音频状态 — 从 AudioSystem 获取
+        if let Some(ref audio) = self.audio_system {
+            save_data.audio_state = audio.get_state();
+        }
+
+        save_data
+    }
+
+    /// 从 `SaveData` 恢复游戏状态。
+    ///
+    /// 恢复顺序（关键 — 先恢复无副作用的子系统，再修改 VM/场景/渲染状态）：
+    /// 1. 先恢复音频状态（失败则整体回滚，不修改 VM/场景/渲染）
+    /// 2. 加载场景（`load_scene` 会重置 VM PC 到 0）
+    /// 3. 恢复 VM 状态（覆盖 PC/寄存器/栈）
+    /// 4. 恢复渲染状态并应用到 renderer（重绘背景和立绘）
+    ///
+    /// 步骤 1 提前的设计理由：音频恢复可能因文件缺失等原因失败，
+    /// 若放在 VM/场景/渲染恢复之后，失败时游戏已处于半恢复状态
+    /// （VM 指向存档场景但 BGM 无声 / 错误日志提示恢复失败）。
+    ///
+    /// # 参数
+    /// - `data`: 之前保存的存档数据
+    /// - `renderer`: 渲染器（用于恢复画面）
+    pub fn restore_game_state(
+        &mut self,
+        save_data: &SaveData,
+        renderer: &mut Option<&mut dyn Renderer>,
+    ) -> Result<(), RuntimeError> {
+        // 步骤 1：恢复音频状态（提前执行 — 失败时 VM/场景/渲染均未修改）
+        // 优先通过 AssetManager 加载 BGM（统一资源管理，享受 LRU 缓存），
+        // AssetManager 不可用时回退到 AudioSystem 的直接文件加载。
+        // 跳过 "pcm://" 合成路径（旧版本存档兼容）。
+        let bgm_path = save_data.audio_state.current_bgm_path.clone();
+        let bgm_looping = save_data.audio_state.bgm_looping;
+        let bgm_volume = save_data.audio_state.bgm_volume;
+        let se_volume = save_data.audio_state.se_volume;
+
+        // 尝试通过 AssetManager 加载（&self 借用，在此语句结束后释放）
+        let pcm_data: Option<(Vec<f32>, u32, u16)> = bgm_path
+            .as_deref()
+            .filter(|p| !p.starts_with("pcm://"))
+            .and_then(|path| self.load_audio_through_asset_manager(path));
+
+        // 应用音频状态（&mut self 借用）
+        if let Some(ref mut audio) = self.audio_system {
+            audio.stop_bgm(0.0);
+            audio.set_se_volume(se_volume);
+
+            if let Some((samples, sample_rate, channels)) = pcm_data {
+                // AssetManager 路径：播放已解码的 PCM
+                let path = bgm_path.as_deref().unwrap_or("bgm");
+                if let Err(e) =
+                    audio.play_bgm_from_pcm(&samples, sample_rate, channels, bgm_looping, 0.0, path)
+                {
+                    log::error!("[SceneManager] 存档恢复 BGM PCM 失败 ({}): {}", path, e);
+                }
+            } else if bgm_path.is_some() {
+                // AssetManager 不可用（未初始化或加载失败），回退到直接文件加载。
+                // 注意：bgm_path 已过滤 pcm:// 合成路径，此处为真实文件路径。
+                audio
+                    .restore_state(&save_data.audio_state)
+                    .map_err(|e| RuntimeError::SaveError(format!("音频状态恢复失败: {}", e)))?;
+            }
+            // pcm:// 合成路径 → 跳过 BGM 恢复，仅恢复音量
+
+            audio.set_bgm_volume(bgm_volume);
+        }
+
+        // 步骤 2：加载场景（这会重置 VM 状态）
+        if !save_data.scene_id.is_empty() {
+            self.load_scene(&save_data.scene_id)?;
+        }
+
+        // 步骤 3：恢复 VM 执行状态（覆盖 load_scene 的默认值）
+        self.vm.restore_from_snapshot(&save_data.vm_snapshot);
+        *self.vm.variables_mut() = save_data.variables.clone();
+        *self.vm.flags_mut() = save_data.flags.clone();
+
+        // 步骤 4：恢复渲染状态到内部记录
+        self.render_state = save_data.render_state.clone();
+
+        // 步骤 5：将渲染状态应用到 renderer（重绘背景和立绘+对话）
+        if let Some(r) = renderer.as_mut() {
+            // 先清除所有旧立绘（防止恢复前的残留精灵干扰存档画面）
+            r.clear_all_characters();
+            // 应用背景
+            if let Some(ref bg_path) = self.render_state.current_bg {
+                r.set_background(bg_path);
+            }
+            // 应用立绘：从 char_id + emotion 解析实际文件路径，
+            // 以 char_id 作为唯一 key 避免多角色互相覆盖。
+            for sprite in &self.render_state.displayed_sprites {
+                let effective_emotion = sprite.emotion.as_deref().unwrap_or("default");
+                let resolved_path = self
+                    .ctx
+                    .resolve_sprite_path(&sprite.sprite_path, effective_emotion)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !resolved_path.is_empty() {
+                    r.show_character(&sprite.sprite_path, &resolved_path, sprite.position);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// 加载场景。
@@ -223,10 +603,13 @@ impl SceneManager {
                     .ok_or_else(|| RuntimeError::SceneNotFound {
                         scene_id: scene_id.to_string(),
                     })?;
+            // 记录 step 前的 PC（用于存档时回退到渲染命令之前）
+            let pre_step_pc = self.vm.pc();
             let action = self.vm.step(scene);
 
             let should_pause = self.process_action(action, &mut renderer)?;
             if should_pause {
+                self.save_pc = pre_step_pc;
                 break;
             }
         }
@@ -419,7 +802,132 @@ impl SceneManager {
                     _ => {}
                 }
 
-                let goto_target = command_bridge::dispatch(&cmd, &self.ctx, renderer);
+                // ── PH2-T08: render_state 追踪 ────────────────────────
+                // 在执行渲染命令前更新内部渲染状态记录（用于存档时捕获画面）
+                match &cmd {
+                    EngineCommand::SetBg { asset, .. } => {
+                        let bg_path = format!("assets/bg/{}.png", asset);
+                        self.render_state.current_bg = Some(bg_path);
+                    }
+                    EngineCommand::ShowChar {
+                        char,
+                        emotion,
+                        pos_byte,
+                        ..
+                    } => {
+                        // 移除同一角色的旧立绘
+                        self.render_state
+                            .displayed_sprites
+                            .retain(|s| s.sprite_path != *char);
+                        // 添加新立绘
+                        self.render_state
+                            .displayed_sprites
+                            .push(aster_core::save::SpriteState {
+                                sprite_path: char.clone(),
+                                position: *pos_byte,
+                                alpha: 1.0,
+                                emotion: if emotion.is_empty() {
+                                    None
+                                } else {
+                                    Some(emotion.clone())
+                                },
+                            });
+                    }
+                    EngineCommand::HideChar { char, .. } => {
+                        self.render_state
+                            .displayed_sprites
+                            .retain(|s| s.sprite_path != *char);
+                    }
+                    EngineCommand::MoveChar {
+                        char: char_id,
+                        pos_byte,
+                        ..
+                    } => {
+                        // 更新角色位置（PH2-T09 修复：MoveChar 之前未被追踪）
+                        for sprite in &mut self.render_state.displayed_sprites {
+                            if sprite.sprite_path == *char_id {
+                                sprite.position = *pos_byte;
+                            }
+                        }
+                    }
+                    EngineCommand::Emotion { char, emotion, .. } => {
+                        for sprite in &mut self.render_state.displayed_sprites {
+                            if sprite.sprite_path == *char {
+                                sprite.emotion = if emotion.is_empty() {
+                                    None
+                                } else {
+                                    Some(emotion.clone())
+                                };
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                // PH2-T08/PH2-T09: 音频命令始终优先走 AssetManager（PCM 路径）。
+                // AssetManager 支持多扩展名回退（.wav/.mp3/.ogg/.flac），
+                // 解决了 resolve_audio_path 硬编码 .wav 导致的"资源不存在"误报。
+                // AssetManager 不可用时 fallback 到 dispatch 的文件路径。
+                //
+                // 注意：先将 PCM 数据提取到局部变量（&self 借用），
+                // 再借用 &mut self.audio_system，避免借用冲突。
+                match &cmd {
+                    EngineCommand::PlayBgm {
+                        asset,
+                        fade_reg: _,
+                        looping,
+                    } => {
+                        let path = resolve_audio_path(asset, "bgm");
+                        // 步骤 1：通过 AssetManager 加载（&self 借用在此结束）
+                        let pcm_data = self.load_audio_through_asset_manager(&path);
+                        // 步骤 2：播放 PCM 数据（&mut self 借用）
+                        if let Some((samples, sample_rate, channels)) = pcm_data
+                            && let Some(audio) = &mut self.audio_system
+                        {
+                            if let Err(e) = audio.play_bgm_from_pcm(
+                                &samples,
+                                sample_rate,
+                                channels,
+                                *looping,
+                                0.0,
+                                &path,
+                            ) {
+                                log::error!("[SceneManager] BGM PCM 播放失败 ({}): {}", path, e);
+                            } else {
+                                log::info!("[SceneManager] BGM PCM 播放成功: {}", path);
+                            }
+                            self.command_log.push(cmd);
+                            return Ok(is_pause);
+                        }
+                    }
+                    EngineCommand::PlaySe {
+                        asset, fade_reg: _, ..
+                    } => {
+                        let path = resolve_audio_path(asset, "se");
+                        let pcm_data = self.load_audio_through_asset_manager(&path);
+                        if let Some((samples, sample_rate, channels)) = pcm_data
+                            && let Some(audio) = &mut self.audio_system
+                        {
+                            if let Err(e) =
+                                audio.play_se_from_pcm(&samples, sample_rate, channels, 0.0, &path)
+                            {
+                                log::error!("[SceneManager] SE PCM 播放失败 ({}): {}", path, e);
+                            }
+                            self.command_log.push(cmd);
+                            return Ok(is_pause);
+                        }
+                    }
+                    _ => {}
+                }
+
+                // PH2-T08: dispatch 剩余命令（含 fallback 音频命令）
+                let goto_target = {
+                    let mut audio_opt: Option<&mut dyn AudioSystem> = match &mut self.audio_system {
+                        Some(boxed) => Some(boxed.as_mut()),
+                        None => None,
+                    };
+                    command_bridge::dispatch(&cmd, &self.ctx, renderer, &mut audio_opt)
+                };
 
                 if let Some((scene_id, label)) = goto_target {
                     self.load_scene(&scene_id)?;

@@ -220,6 +220,64 @@ impl Vm {
         &self.call_stack
     }
 
+    /// 返回操作数栈的不可变引用。
+    ///
+    /// 用于存档时捕获操作数栈的完整状态。
+    #[inline]
+    pub fn stack(&self) -> &[Value] {
+        &self.stack
+    }
+
+    /// 生成 VM 当前完整状态的快照。
+    ///
+    /// 捕获 PC、16 个寄存器、调用栈和操作数栈的内容，
+    /// 返回 `aster_core::save::VmSnapshot` 用于 `SaveData` 序列化。
+    ///
+    /// # 返回值
+    /// 包含完整 VM 执行上下文的快照结构体。
+    pub fn to_snapshot(&self) -> aster_core::save::VmSnapshot {
+        use aster_core::save::CallFrameSnapshot;
+
+        let call_stack: Vec<CallFrameSnapshot> = self
+            .call_stack
+            .iter()
+            .map(|frame| CallFrameSnapshot {
+                return_pc: frame.return_pc,
+                saved_registers: frame.saved_registers.clone(),
+            })
+            .collect();
+
+        aster_core::save::VmSnapshot {
+            pc: self.pc,
+            registers: self.registers.clone(),
+            call_stack,
+            stack: self.stack.clone(),
+        }
+    }
+
+    /// 从快照恢复 VM 的执行状态。
+    ///
+    /// 恢复 PC、16 个寄存器、调用栈和操作数栈。
+    /// **注意**：此方法不恢复 `variables` 和 `flags`——
+    /// 它们由 `SceneManager::restore_game_state()` 单独处理，
+    /// 以便在读档时保持场景间持久状态的语义正确性。
+    ///
+    /// # 参数
+    /// - `snapshot`：之前通过 `to_snapshot()` 获取的 VM 快照
+    pub fn restore_from_snapshot(&mut self, snapshot: &aster_core::save::VmSnapshot) {
+        self.pc = snapshot.pc;
+        self.registers = snapshot.registers.clone();
+        self.stack = snapshot.stack.clone();
+        self.call_stack = snapshot
+            .call_stack
+            .iter()
+            .map(|frame| CallFrame {
+                return_pc: frame.return_pc,
+                saved_registers: frame.saved_registers.clone(),
+            })
+            .collect();
+    }
+
     // ─── 核心方法 ──────────────────────────────────────────────────────
 
     /// 执行单条字节码指令并返回 `VmAction`。
