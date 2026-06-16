@@ -58,11 +58,11 @@ fn get_process_memory_kb() -> u64 {
         if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
             // statm 格式：size resident share text lib data dt
             // 第二个字段是 RSS（resident set size），单位是页
-            if let Some(rss_pages) = content.split_whitespace().nth(1) {
-                if let Ok(pages) = rss_pages.parse::<u64>() {
-                    // 页面大小通常为 4KB（可通过 sysconf 获取，但 4KB 覆盖绝大多数情况）
-                    return pages * 4;
-                }
+            if let Some(rss_pages) = content.split_whitespace().nth(1)
+                && let Ok(pages) = rss_pages.parse::<u64>()
+            {
+                // 页面大小通常为 4KB（可通过 sysconf 获取，但 4KB 覆盖绝大多数情况）
+                return pages * 4;
             }
         }
     }
