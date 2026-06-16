@@ -5,6 +5,7 @@
 //!           存档文件格式为 `[4 字节 CRC32 LE] + [MessagePack 序列化的 SaveData]`，
 //!           确保存档完整性可验证。支持 5 个手动槽位（0-4）、
 //!           1 个快速存档槽位（98）和 1 个自动存档槽位（99）。
+//!           提供引擎内基础存档/读档 UI 状态机（SaveUi）。
 //! 作者：Claude (AI)
 //! 创建日期：2026-06-12
 //! 最后修改：2026-06-16
@@ -13,6 +14,7 @@
 //! - aster_core::save::{SaveData, SaveSlotInfo}（存档数据结构）
 //! - rmp_serde（MessagePack 序列化/反序列化）
 //! - crc32fast（CRC32 校验和计算）
+//! - image（PNG 缩略图编码）
 //!
 //! 架构位置：aster-core ← aster-save
 //!
@@ -20,7 +22,8 @@
 //!
 //! | 模块 | 文件 | 说明 |
 //! |------|------|------|
-//! | `save_manager` | `save_manager.rs` | SaveManager 结构体 — 存档 CRUD + CRC32 校验 + MessagePack 序列化 |
+//! | `save_manager` | `save_manager.rs` | SaveManager 结构体 — 存档 CRUD + CRC32 + 缩略图 |
+//! | `save_ui` | `save_ui.rs` | SaveUi 状态机 — 存档/读档 UI 交互逻辑 + UiCommand 渲染指令 |
 //!
 //! ## 库存档槽位分配
 //!
@@ -32,13 +35,19 @@
 //!
 //! ## 对应 Phase 2 任务
 //!
-//! - **PH2-T06**（本任务）：SaveData 数据结构 + SaveManager 基础读写 + CRC32
-//! - **PH2-T07**（后续）：槽位管理 UI + 缩略图捕获
+//! - **PH2-T06**：SaveData 数据结构 + SaveManager 基础读写 + CRC32
+//! - **PH2-T07**（本任务）：槽位管理 UI + 缩略图捕获
 
 // 模块声明
 pub mod save_manager;
+pub mod save_ui;
 
-// 重导出所有公开类型
+// 重导出 save_manager 公开类型
 pub use save_manager::{
-    AUTO_SLOT, CURRENT_VERSION, MANUAL_SLOT_COUNT, QUICK_SLOT, SaveError, SaveManager,
+    AUTO_SLOT, CURRENT_VERSION, MANUAL_SLOT_COUNT, QUICK_SLOT, SaveError, SaveManager, slot_label,
+};
+
+// 重导出 save_ui 公开类型
+pub use save_ui::{
+    SaveUi, SaveUiMode, SaveUiResult, SaveUiState, SlotDisplayInfo, UiAction, UiCommand,
 };

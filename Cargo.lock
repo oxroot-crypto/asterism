@@ -354,6 +354,7 @@ dependencies = [
  "aster-core",
  "chrono",
  "crc32fast",
+ "image",
  "rmp-serde",
  "serde",
  "thiserror 2.0.18",
