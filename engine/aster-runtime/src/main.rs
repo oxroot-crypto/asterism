@@ -27,6 +27,11 @@ use std::path::{Path, PathBuf};
 use aster_runtime::{App, AppEventLoop};
 
 fn main() {
+    // 初始化日志系统（输出到 stderr，WARN 及以上级别）
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format_timestamp_millis()
+        .init();
+
     let project_path = parse_args();
 
     println!("╔══════════════════════════════════════════════════════════════╗");

@@ -30,6 +30,7 @@
 //! 2. **内存预算上限**：纹理 256MB / 音频 128MB（防止大文件占满内存）
 //! 3. 两种约束任一超限均触发 LRU 淘汰
 
+use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::loader::LoadedAsset;
@@ -74,21 +75,29 @@ pub const DEFAULT_AUDIO_BUDGET: u64 = 128 * 1024 * 1024;
 ///
 /// 手动实现 `Debug`（非 derive），因为 `LoadedAsset` 不实现 `Debug`。
 /// 仅输出 `estimated_size` 信息。
+///
+/// # Sync 实现说明
+///
+/// `last_access` 使用 `Mutex<Instant>` 而非 `Cell<Instant>`，
+/// 以使 `CachedAsset: Sync` 从而 `Arc<CachedAsset>: Send + Sync`。
+/// 外层 `Arc<Mutex<AssetManager>>` 已串行化所有对 `CachedAsset` 的访问，
+/// 因此此 `Mutex` 永无锁竞争，开销仅一次 lock/unlock 原子操作。
 pub struct CachedAsset {
     /// 已加载的资源数据（纹理/AudioData/Bytes）
     pub data: LoadedAsset,
     /// 估算内存占用（字节），用于预算检查和淘汰决策
     pub estimated_size: u64,
     /// 最后访问时间（Instant::now()），用于调试和统计报告
-    /// 注意：实际的 LRU 顺序由 `LruCache` 维护，此字段为辅助信息
-    pub last_access: Instant,
+    /// 注意：实际的 LRU 顺序由 `LruCache` 维护，此字段为辅助信息。
+    /// 使用 `Mutex<Instant>` 以支持通过 `Arc` 共享引用更新并保持 `Send + Sync`。
+    pub last_access: Mutex<Instant>,
 }
 
 impl std::fmt::Debug for CachedAsset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CachedAsset")
             .field("estimated_size", &self.estimated_size)
-            .field("last_access", &self.last_access)
+            .field("last_access", &*self.last_access.lock().unwrap())
             .field(
                 "data_type",
                 &match &self.data {
@@ -361,7 +370,7 @@ mod tests {
                 data: vec![1, 2, 3],
             },
             estimated_size: 3,
-            last_access: Instant::now(),
+            last_access: Mutex::new(Instant::now()),
         };
 
         let debug_str = format!("{:?}", asset);

@@ -78,17 +78,41 @@ pub enum SaveUiState {
         selected: usize,
     },
     /// 覆盖确认对话框
+    ///
+    /// 存储 mode + slots + selected 以确保 Cancel 时能返回 SlotList
+    /// 且保持原来的选中位置（而非重置到 0）。
     ConfirmOverwrite {
+        /// 操作模式（存档/读档）
+        mode: SaveUiMode,
+        /// 所有槽位的展示信息（用于 Cancel 返回列表）
+        slots: Vec<SlotDisplayInfo>,
         /// 要覆盖的槽位号
         slot: u8,
+        /// 进入确认前的选中索引（用于 Cancel 返回列表时恢复位置）
+        selected: usize,
     },
     /// 删除确认对话框
+    ///
+    /// 存储 mode + slots + selected 以确保 Cancel 时能返回 SlotList
+    /// 且保持原来的选中位置。
     ConfirmDelete {
+        /// 操作模式
+        mode: SaveUiMode,
+        /// 所有槽位的展示信息
+        slots: Vec<SlotDisplayInfo>,
         /// 要删除的槽位号
         slot: u8,
+        /// 进入确认前的选中索引（用于 Cancel 返回列表时恢复位置）
+        selected: usize,
     },
     /// 错误提示（显示后按任意键返回 SlotList）
+    ///
+    /// 存储 mode + slots 以确保按任意键后能返回 SlotList（而非退出 UI）。
     Error {
+        /// 操作模式
+        mode: SaveUiMode,
+        /// 所有槽位的展示信息
+        slots: Vec<SlotDisplayInfo>,
         /// 错误消息文本
         message: String,
     },
@@ -310,6 +334,24 @@ impl SaveUi {
         self.state = SaveUiState::Hidden;
     }
 
+    /// 进入错误提示状态，显示错误消息。
+    ///
+    /// 在错误状态下，用户按任意键后返回槽位列表（而非退出 UI）。
+    /// 调用方需传入当前操作模式和槽位列表，以便用户从错误提示返回后
+    /// 继续浏览槽位列表。
+    ///
+    /// # 参数
+    /// - `message`：向用户展示的错误描述（中文）
+    /// - `mode`：当前操作模式（存档/读档）
+    /// - `slots`：当前槽位展示列表
+    pub fn set_error(&mut self, message: String, mode: SaveUiMode, slots: Vec<SlotDisplayInfo>) {
+        self.state = SaveUiState::Error {
+            mode,
+            slots,
+            message,
+        };
+    }
+
     /// 处理用户输入动作，驱动状态转换并返回操作结果。
     ///
     /// # 参数
@@ -382,14 +424,20 @@ impl SaveUi {
                     }
                     UiAction::Cancel => (SaveUiState::Hidden, SaveUiResult::Closed),
                     UiAction::Confirm => {
-                        let slot_info = &slots[selected];
+                        // 提前提取 slot 和 has_save（Copy 类型），
+                        // 避免后续移动 slots 时与 slot_info 借用冲突
+                        let selected_slot = slots[selected].slot;
+                        let selected_has_save = slots[selected].has_save;
                         match mode {
                             SaveUiMode::Save => {
-                                if slot_info.has_save {
-                                    // 有数据 → 覆盖确认
+                                if selected_has_save {
+                                    // 有数据 → 覆盖确认（携带 mode+slots+selected 以便 Cancel 返回列表）
                                     (
                                         SaveUiState::ConfirmOverwrite {
-                                            slot: slot_info.slot,
+                                            mode,
+                                            slots,
+                                            slot: selected_slot,
+                                            selected,
                                         },
                                         SaveUiResult::None,
                                     )
@@ -398,24 +446,26 @@ impl SaveUi {
                                     (
                                         SaveUiState::Hidden,
                                         SaveUiResult::SaveRequested {
-                                            slot: slot_info.slot,
+                                            slot: selected_slot,
                                         },
                                     )
                                 }
                             }
                             SaveUiMode::Load => {
-                                if slot_info.has_save {
+                                if selected_has_save {
                                     // 有数据 → 直接读档
                                     (
                                         SaveUiState::Hidden,
                                         SaveUiResult::LoadRequested {
-                                            slot: slot_info.slot,
+                                            slot: selected_slot,
                                         },
                                     )
                                 } else {
-                                    // 空槽位 → 错误提示
+                                    // 空槽位 → 错误提示（携带 mode+slots 以便返回列表）
                                     (
                                         SaveUiState::Error {
+                                            mode,
+                                            slots,
                                             message: "该槽位为空，无法读取存档。".into(),
                                         },
                                         SaveUiResult::None,
@@ -425,17 +475,24 @@ impl SaveUi {
                         }
                     }
                     UiAction::Delete => {
-                        let slot_info = &slots[selected];
-                        if slot_info.has_save {
+                        // 提前提取 slot 和 has_save，避免借用冲突
+                        let selected_slot = slots[selected].slot;
+                        let selected_has_save = slots[selected].has_save;
+                        if selected_has_save {
                             (
                                 SaveUiState::ConfirmDelete {
-                                    slot: slot_info.slot,
+                                    mode,
+                                    slots,
+                                    slot: selected_slot,
+                                    selected,
                                 },
                                 SaveUiResult::None,
                             )
                         } else {
                             (
                                 SaveUiState::Error {
+                                    mode,
+                                    slots,
                                     message: "该槽位为空，没有可删除的存档。".into(),
                                 },
                                 SaveUiResult::None,
@@ -445,27 +502,74 @@ impl SaveUi {
                 }
             }
 
-            SaveUiState::ConfirmOverwrite { slot } => match action {
+            SaveUiState::ConfirmOverwrite {
+                mode,
+                slots,
+                slot,
+                selected,
+            } => match action {
                 UiAction::Confirm => (SaveUiState::Hidden, SaveUiResult::SaveRequested { slot }),
                 UiAction::Cancel => {
-                    // 回到槽位列表（需要调用方重新传入 slots）
-                    // 注：Cancel 时 slots 信息会丢失，需要调用方在收到 None 后
-                    // 通过 open() 重新构建。实际集成时 SceneManager 会在收到 None
-                    // 后调用 render_commands() 并重新设置状态。
-                    (SaveUiState::Hidden, SaveUiResult::Closed)
+                    // 取消覆盖确认 → 返回槽位列表，恢复原来的选中位置
+                    (
+                        SaveUiState::SlotList {
+                            mode,
+                            slots,
+                            selected,
+                        },
+                        SaveUiResult::None,
+                    )
                 }
-                _ => (SaveUiState::ConfirmOverwrite { slot }, SaveUiResult::None),
+                _ => (
+                    SaveUiState::ConfirmOverwrite {
+                        mode,
+                        slots,
+                        slot,
+                        selected,
+                    },
+                    SaveUiResult::None,
+                ),
             },
 
-            SaveUiState::ConfirmDelete { slot } => match action {
+            SaveUiState::ConfirmDelete {
+                mode,
+                slots,
+                slot,
+                selected,
+            } => match action {
                 UiAction::Confirm => (SaveUiState::Hidden, SaveUiResult::DeleteRequested { slot }),
-                UiAction::Cancel => (SaveUiState::Hidden, SaveUiResult::Closed),
-                _ => (SaveUiState::ConfirmDelete { slot }, SaveUiResult::None),
+                UiAction::Cancel => {
+                    // 取消删除确认 → 返回槽位列表，恢复原来的选中位置
+                    (
+                        SaveUiState::SlotList {
+                            mode,
+                            slots,
+                            selected,
+                        },
+                        SaveUiResult::None,
+                    )
+                }
+                _ => (
+                    SaveUiState::ConfirmDelete {
+                        mode,
+                        slots,
+                        slot,
+                        selected,
+                    },
+                    SaveUiResult::None,
+                ),
             },
 
-            SaveUiState::Error { .. } => {
-                // 任意键返回槽位列表（但 slots 已丢失，由调用方重新打开）
-                (SaveUiState::Hidden, SaveUiResult::Closed)
+            SaveUiState::Error { mode, slots, .. } => {
+                // 任意键返回槽位列表（而非退出整个 UI）
+                (
+                    SaveUiState::SlotList {
+                        mode,
+                        slots,
+                        selected: 0,
+                    },
+                    SaveUiResult::None,
+                )
             }
         };
 
@@ -603,7 +707,7 @@ impl SaveUi {
                 commands
             }
 
-            SaveUiState::ConfirmOverwrite { slot } => {
+            SaveUiState::ConfirmOverwrite { slot, .. } => {
                 vec![
                     UiCommand::Overlay { alpha: 0.7 },
                     UiCommand::ConfirmDialog {
@@ -619,7 +723,7 @@ impl SaveUi {
                 ]
             }
 
-            SaveUiState::ConfirmDelete { slot } => {
+            SaveUiState::ConfirmDelete { slot, .. } => {
                 vec![
                     UiCommand::Overlay { alpha: 0.7 },
                     UiCommand::ConfirmDialog {
@@ -635,7 +739,7 @@ impl SaveUi {
                 ]
             }
 
-            SaveUiState::Error { message } => {
+            SaveUiState::Error { message, .. } => {
                 vec![
                     UiCommand::Overlay { alpha: 0.7 },
                     UiCommand::Text {
@@ -823,7 +927,7 @@ mod tests {
 
         // 应进入 Error 状态
         match ui.state() {
-            SaveUiState::Error { message } => {
+            SaveUiState::Error { message, .. } => {
                 assert!(message.contains("为空"), "错误消息应包含'为空'");
             }
             other => panic!("期望 Error 状态，实际为 {:?}", other),
@@ -845,7 +949,7 @@ mod tests {
 
         // 应进入 ConfirmOverwrite 状态
         match ui.state() {
-            SaveUiState::ConfirmOverwrite { slot } => {
+            SaveUiState::ConfirmOverwrite { slot, .. } => {
                 assert_eq!(*slot, 0);
             }
             other => panic!("期望 ConfirmOverwrite 状态，实际为 {:?}", other),
@@ -888,7 +992,7 @@ mod tests {
         let result = ui.handle_input(UiAction::Delete);
         assert_eq!(result, SaveUiResult::None);
         match ui.state() {
-            SaveUiState::ConfirmDelete { slot } => assert_eq!(*slot, 2),
+            SaveUiState::ConfirmDelete { slot, .. } => assert_eq!(*slot, 2),
             other => panic!("期望 ConfirmDelete，实际为 {:?}", other),
         }
 
@@ -976,35 +1080,64 @@ mod tests {
         assert_eq!(result, SaveUiResult::None);
 
         match ui.state() {
-            SaveUiState::Error { message } => {
+            SaveUiState::Error { message, .. } => {
                 assert!(message.contains("没有可删除"));
             }
             other => panic!("期望 Error，实际为 {:?}", other),
         }
     }
 
-    /// 验证 ConfirmOverwrite 中按 Cancel 会关闭 UI。
+    /// 验证 ConfirmOverwrite 中按 Cancel 返回槽位列表（而非关闭 UI），
+    /// 且选中位置保持不变（而非重置到 0）。
     #[test]
     fn test_overwrite_cancel() {
         let mut ui = SaveUi::new();
-        let infos = mock_slot_infos(&[0]);
+        let infos = mock_slot_infos(&[0, 2]); // 槽位 0 和 2 有数据
         ui.open(SaveUiMode::Save, &infos);
-        ui.handle_input(UiAction::Confirm); // → ConfirmOverwrite
 
+        // 导航到槽位 2（索引 2）
+        ui.handle_input(UiAction::Down); // → idx 1
+        ui.handle_input(UiAction::Down); // → idx 2
+        assert_eq!(ui.selected_slot(), Some(2));
+
+        ui.handle_input(UiAction::Confirm); // → ConfirmOverwrite（slot=2）
         let result = ui.handle_input(UiAction::Cancel);
-        assert_eq!(result, SaveUiResult::Closed);
+        // Cancel 应返回 SlotList 而非 Closed
+        assert_eq!(result, SaveUiResult::None);
+        // 应保留原来的选中位置
+        match ui.state() {
+            SaveUiState::SlotList { selected, .. } => {
+                assert_eq!(*selected, 2, "Cancel 后应恢复原选中位置 idx=2");
+            }
+            other => panic!("期望 SlotList，实际为 {:?}", other),
+        }
     }
 
-    /// 验证 ConfirmDelete 中按 Cancel 关闭 UI。
+    /// 验证 ConfirmDelete 中按 Cancel 返回槽位列表（而非关闭 UI），
+    /// 且选中位置保持不变（而非重置到 0）。
     #[test]
     fn test_delete_cancel() {
         let mut ui = SaveUi::new();
-        let infos = mock_slot_infos(&[0]);
+        let infos = mock_slot_infos(&[0, 3]); // 槽位 0 和 3 有数据
         ui.open(SaveUiMode::Save, &infos);
-        ui.handle_input(UiAction::Delete); // → ConfirmDelete
 
+        // 导航到槽位 3（索引 3）
+        ui.handle_input(UiAction::Down); // → idx 1
+        ui.handle_input(UiAction::Down); // → idx 2
+        ui.handle_input(UiAction::Down); // → idx 3
+        assert_eq!(ui.selected_slot(), Some(3));
+
+        ui.handle_input(UiAction::Delete); // → ConfirmDelete（slot=3）
         let result = ui.handle_input(UiAction::Cancel);
-        assert_eq!(result, SaveUiResult::Closed);
+        // Cancel 应返回 SlotList 而非 Closed
+        assert_eq!(result, SaveUiResult::None);
+        // 应保留原来的选中位置
+        match ui.state() {
+            SaveUiState::SlotList { selected, .. } => {
+                assert_eq!(*selected, 3, "Cancel 后应恢复原选中位置 idx=3");
+            }
+            other => panic!("期望 SlotList，实际为 {:?}", other),
+        }
     }
 
     /// 验证 render_commands 在 SlotList 状态下返回非空命令列表。

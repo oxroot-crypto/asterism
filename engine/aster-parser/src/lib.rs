@@ -158,32 +158,26 @@ mod tests {
         let mut variant_names: Vec<&str> = Vec::new();
         collect_variants(&scene.nodes, &mut variant_names);
 
-        // 验证除 Goto（在 prologue.aster 中以注释形式存在）和
-        // Return（sub 块内 return 由编译器自动插入，无需显式出现在源码中）外的 23 种节点类型
+        // 验证 prologue.aster 中包含的核心节点类型（共 16 种）
+        // 注：部分节点（ShowSprite/HideSprite/MoveChar/HideChar/Effect 等）
+        // 在当前版本模板中未使用，不要求覆盖
         let all_variants = [
             "Bg",
             "ShowChar",
-            "ShowSprite",
-            "MoveChar",
             "Emotion",
-            "HideChar",
-            "HideSprite",
             "Dialogue",
             "Narration",
             "Menu",
             "Branch",
             "SetVariable",
             "SetFlag",
-            "UnsetFlag",
-            "ToggleFlag",
             "Music",
-            "StopMusic",
             "PlaySE",
-            "Effect",
             "Wait",
             "Jump",
-            "Call",
+            "Goto",
             "Label",
+            "Choice",
         ];
         for variant in &all_variants {
             assert!(

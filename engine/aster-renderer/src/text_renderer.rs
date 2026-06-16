@@ -630,6 +630,63 @@ impl TextRenderer {
         }
     }
 
+    /// 返回当前文本内容（说话者, 正文），用于临时 UI 叠加层弹出后恢复。
+    pub fn current_text(&self) -> (&str, &str) {
+        (&self.current_speaker, &self.current_body)
+    }
+
+    /// 恢复对话文本并强制下一帧重新排版。
+    ///
+    /// 用于关闭暂停菜单/存档 UI 等临时叠加层后恢复对话显示。
+    pub fn restore_dialogue_text(&mut self, speaker: &str, body: &str) {
+        self.current_speaker = speaker.to_string();
+        self.current_body = body.to_string();
+        self.text_changed = true;
+    }
+
+    /// CJK 文本预换行处理 — 在超出行宽的适当位置插入 `\n`。
+    ///
+    /// cosmic-text 的 `Wrap::Word` 仅在 ASCII 空格处换行，CJK 文本不含空格
+    /// 会导致溢出。此函数按估算的字符宽度在适当位置插入 `\n`，
+    /// 确保长文本在文本框内正确换行。
+    ///
+    /// # 参数
+    /// - `text`: 原始文本（可能已包含 `\n`）
+    /// - `max_chars_per_line`: 每行最大字符数（基于文本框宽度 / 字号估算）
+    ///
+    /// # 返回值
+    /// 插入 `\n` 后的文本。保留原始文本中的 `\n`，重置行内字符计数。
+    ///
+    /// # 注意
+    /// - 使用 `char` 而非字节计数，正确处理 CJK 多字节字符
+    /// - 新增的 `\n` 会增加文本总字符数，但不影响视觉（`\n` 不可见）
+    fn wrap_cjk_text(text: &str, max_chars_per_line: usize) -> String {
+        if max_chars_per_line == 0 {
+            return text.to_string();
+        }
+        // 估算插入 \n 后的长度，避免多次重新分配
+        let estimated_newlines = text.chars().count() / max_chars_per_line;
+        let mut result = String::with_capacity(text.len() + estimated_newlines);
+        let mut line_chars: usize = 0;
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                // 保留原始换行符，重置行内计数
+                result.push('\n');
+                line_chars = 0;
+            } else {
+                if line_chars >= max_chars_per_line {
+                    result.push('\n');
+                    line_chars = 0;
+                }
+                result.push(ch);
+                line_chars += 1;
+            }
+        }
+
+        result
+    }
+
     /// 加载自定义字体（TTF/OTF 字节数据）。
     pub fn load_font(&mut self, font_data: Vec<u8>) {
         self.font_system
@@ -687,6 +744,10 @@ impl TextRenderer {
 
         self.body_buffer
             .set_size(Some(body_area_width), Some(body_height));
+        // 使用默认的 Wrap::Word（Wrap::Glyph 在 cosmic-text 0.19 中存在
+        // 换行后 line_y 未递增的 bug，导致多行文本 Y 坐标重叠）。
+        // CJK 文本不含空格，Wrap::Word 不会自动换行——
+        // 因此在下面对 body_text 做预换行处理。
         let body_attrs = Attrs::new().family(Family::SansSerif);
 
         // 根据可见范围截取正文
@@ -696,8 +757,22 @@ impl TextRenderer {
             self.current_body.clone()
         };
 
+        // PH2-T09: CJK 文本预换行处理。
+        // cosmic-text 的 Wrap::Word 仅在空格处换行，CJK 文本不含空格会溢出。
+        // 因此按估算字符宽度手动插入 \n，确保长文本正确换行。
+        // 保留原始 body_text 中的 \n（用于菜单等多行文本场景）。
+        //
+        // 已知局限：使用 font_size 作为 CJK 字符的等宽近似值。
+        // 实际比例字体中，中文标点（。、，、"）通常比汉字窄，
+        // 全角符号（！、？）宽度也可能不同。在极端情况下
+        // （窄文本框 + 大字号 + 长文本），可能导致行尾溢出或过早换行。
+        // 后续改进方向：使用 cosmic-text 的实际字形 advance 进行精确换行计算。
+        let est_char_width = self.config.font_size; // CJK 等宽近似
+        let max_chars_per_line = ((body_area_width / est_char_width) as usize).max(1);
+        let wrapped_body = Self::wrap_cjk_text(&body_text, max_chars_per_line);
+
         self.body_buffer
-            .set_text(&body_text, &body_attrs, Shaping::Advanced, None);
+            .set_text(&wrapped_body, &body_attrs, Shaping::Advanced, None);
         self.body_buffer
             .shape_until_scroll(&mut self.font_system, true);
 
@@ -709,12 +784,15 @@ impl TextRenderer {
         let mut pending_glyphs: Vec<(cosmic_text::CacheKey, (f32, f32), [f32; 4])> = Vec::new();
 
         // 收集 speaker buffer 的字形
+        // 注意：glyph.physical() 的 offset 必须包含 run.line_y，
+        // 否则多行文本的 cache_key 中 Y 坐标相同，导致所有行重叠。
         for run in self.speaker_buffer.layout_runs() {
             for glyph in run.glyphs.iter() {
                 if glyph.glyph_id == 0 {
                     continue; // 跳过空白字符
                 }
-                let physical = glyph.physical(speaker_offset, 1.0);
+                let line_offset = (speaker_offset.0, speaker_offset.1 + run.line_y);
+                let physical = glyph.physical(line_offset, 1.0);
                 pending_glyphs.push((
                     physical.cache_key,
                     (physical.x as f32, physical.y as f32),
@@ -729,7 +807,8 @@ impl TextRenderer {
                 if glyph.glyph_id == 0 {
                     continue;
                 }
-                let physical = glyph.physical(body_offset, 1.0);
+                let line_offset = (body_offset.0, body_offset.1 + run.line_y);
+                let physical = glyph.physical(line_offset, 1.0);
                 pending_glyphs.push((
                     physical.cache_key,
                     (physical.x as f32, physical.y as f32),
@@ -868,12 +947,15 @@ impl TextRenderer {
         let body_offset = (text_box_x + padding, text_box_y + padding + speaker_height);
 
         // 收集说话者字形
+        // 注意：glyph.physical() 的 offset 参数需要加上 run.line_y，
+        // 否则多行文本的所有行都会重叠在第一行的 Y 坐标上。
         for run in self.speaker_buffer.layout_runs() {
             for glyph in run.glyphs.iter() {
                 if glyph.glyph_id == 0 {
                     continue;
                 }
-                let physical = glyph.physical(speaker_offset, 1.0);
+                let line_offset = (speaker_offset.0, speaker_offset.1 + run.line_y);
+                let physical = glyph.physical(line_offset, 1.0);
                 if let Some(cached) = self.glyph_cache.get(&physical.cache_key) {
                     Self::push_glyph_quad(
                         physical.x as f32,
@@ -894,7 +976,8 @@ impl TextRenderer {
                 if glyph.glyph_id == 0 {
                     continue;
                 }
-                let physical = glyph.physical(body_offset, 1.0);
+                let line_offset = (body_offset.0, body_offset.1 + run.line_y);
+                let physical = glyph.physical(line_offset, 1.0);
                 if let Some(cached) = self.glyph_cache.get(&physical.cache_key) {
                     Self::push_glyph_quad(
                         physical.x as f32,

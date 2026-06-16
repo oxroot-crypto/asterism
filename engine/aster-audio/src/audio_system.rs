@@ -695,6 +695,7 @@ impl AudioSystem {
         channels: u16,
         looping: bool,
         fade_in: f64,
+        asset_path: &str,
     ) -> Result<(), AudioError> {
         self.stop_bgm_with_fade(0.0);
 
@@ -720,19 +721,26 @@ impl AudioSystem {
             })?;
 
         self.bgm_handle = Some(handle);
-        self.current_bgm_path = Some("pcm://bgm".into());
+        // 存储真实文件路径而非合成路径，确保存档恢复时能正确找到音频文件
+        self.current_bgm_path = Some(asset_path.to_string());
         self.bgm_looping = looping;
         self.bgm_start_time = Some(Instant::now());
         Ok(())
     }
 
     /// 从已解码的 PCM 样本播放 SE（供 AssetManager 集成使用）。
+    ///
+    /// `asset_path` 参数用于日志记录（调试时方便定位音频来源）。
+    /// 注意：SE 采用 fire-and-forget 模式，不追踪单个播放状态，
+    /// 因此不存储 `current_se_path`。如需 SE 状态追踪（如存档中保存 SE 状态），
+    /// 需额外添加 `current_se_paths: Vec<String>` 字段。
     pub fn play_se_from_pcm(
         &mut self,
         samples: &[f32],
         sample_rate: u32,
         channels: u16,
         fade_in: f64,
+        asset_path: &str,
     ) -> Result<(), AudioError> {
         let mut sound_data = Self::sound_data_from_pcm(samples, sample_rate, channels)?;
 
@@ -747,7 +755,7 @@ impl AudioSystem {
         self.se_track
             .play(sound_data)
             .map_err(|e| AudioError::PlaybackError {
-                reason: format!("无法从 PCM 播放 SE：{}", e),
+                reason: format!("无法从 PCM 播放 SE \"{}\"：{}", asset_path, e),
             })?;
 
         Ok(())

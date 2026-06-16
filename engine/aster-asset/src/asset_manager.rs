@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use aster_core::{AssetId, AssetType};
@@ -431,11 +431,7 @@ impl AssetManager {
             self.stats.hits += 1;
             // 更新 last_access 时间戳（调试/统计用）
             // LruCache::get() 已更新内部 LRU 顺序，last_access 为辅助信息
-            // 使用 unsafe 绕过 Arc 不可变引用来更新 last_access
-            let ptr = Arc::as_ptr(cached) as *mut CachedAsset;
-            unsafe {
-                (*ptr).last_access = Instant::now();
-            }
+            *cached.last_access.lock().unwrap() = Instant::now();
             return Ok(Arc::clone(cached));
         }
 
@@ -469,7 +465,7 @@ impl AssetManager {
         let cached = Arc::new(CachedAsset {
             data,
             estimated_size,
-            last_access: Instant::now(),
+            last_access: Mutex::new(Instant::now()),
         });
 
         // 更新对应类型的预算计数器

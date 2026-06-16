@@ -33,6 +33,10 @@ pub enum GameAction {
     Advance,
     /// 打开菜单（Esc / 右键）— Phase 1 预留，暂无菜单功能
     OpenMenu,
+    /// 菜单/UI 向上导航（ArrowUp / W 键）
+    Up,
+    /// 菜单/UI 向下导航（ArrowDown / S 键）
+    Down,
     /// 快进模式（Ctrl 键按下）— Phase 4 实现完整 Skip 逻辑
     Skip,
     /// 自动模式切换（A 键）— Phase 4 实现
@@ -191,6 +195,8 @@ impl InputManager {
         match key {
             Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => GameAction::Advance,
             Key::Named(NamedKey::Escape) => GameAction::OpenMenu,
+            Key::Named(NamedKey::ArrowUp) => GameAction::Up,
+            Key::Named(NamedKey::ArrowDown) => GameAction::Down,
             Key::Named(NamedKey::F5) => GameAction::QuickSave,
             Key::Named(NamedKey::F9) => GameAction::QuickLoad,
             _ => GameAction::None,

@@ -159,8 +159,15 @@ impl SaveManager {
     /// # Panics
     /// （无）—— 目录创建失败时会静默忽略（错误延迟到首次 `save()` 操作时报告）。
     pub fn new(save_dir: PathBuf) -> Self {
-        // 尝试创建存档目录（静默忽略失败——首次 save 操作时会暴露问题）
-        let _ = fs::create_dir_all(&save_dir);
+        // 尝试创建存档目录
+        // 失败时输出警告到 stderr，错误延迟到首次 save() 时以更具体的 IO 错误暴露
+        if let Err(e) = fs::create_dir_all(&save_dir) {
+            eprintln!(
+                "[SaveManager] 警告：无法创建存档目录 \"{}\"：{}。首次 save() 操作将失败。",
+                save_dir.display(),
+                e
+            );
+        }
 
         Self { save_dir }
     }

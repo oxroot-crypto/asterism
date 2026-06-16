@@ -65,11 +65,11 @@ impl AudioSystem for aster_audio::AudioSystem {
     }
 
     fn set_bgm_volume(&mut self, volume: f32) {
-        self.set_bgm_volume(volume);
+        aster_audio::AudioSystem::set_bgm_volume(self, volume);
     }
 
     fn set_se_volume(&mut self, volume: f32) {
-        self.set_se_volume(volume);
+        aster_audio::AudioSystem::set_se_volume(self, volume);
     }
 
     fn play_bgm_from_pcm(
@@ -79,8 +79,9 @@ impl AudioSystem for aster_audio::AudioSystem {
         channels: u16,
         looping: bool,
         fade_in: f64,
+        asset_path: &str,
     ) -> Result<(), String> {
-        self.play_bgm_from_pcm(samples, sample_rate, channels, looping, fade_in)
+        self.play_bgm_from_pcm(samples, sample_rate, channels, looping, fade_in, asset_path)
             .map_err(|e| e.to_string())
     }
 
@@ -90,8 +91,9 @@ impl AudioSystem for aster_audio::AudioSystem {
         sample_rate: u32,
         channels: u16,
         fade_in: f64,
+        asset_path: &str,
     ) -> Result<(), String> {
-        self.play_se_from_pcm(samples, sample_rate, channels, fade_in)
+        self.play_se_from_pcm(samples, sample_rate, channels, fade_in, asset_path)
             .map_err(|e| e.to_string())
     }
 
@@ -185,6 +187,25 @@ pub struct App {
     save_manager: Option<Arc<SaveManager>>,
     /// 当前存档/读档 UI 模式（None = UI 未打开）
     save_ui_mode: Option<SaveUiMode>,
+
+    // PH2-T09: 暂停菜单
+    /// 暂停菜单是否打开
+    pause_menu_open: bool,
+    /// 暂停菜单当前选中项（0=继续, 1=存档, 2=读档, 3=退出）
+    pause_menu_selected: usize,
+}
+
+/// 暂停菜单操作结果。
+///
+/// 替代 `bool` 返回值，明确区分三种可能的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseMenuResult {
+    /// 菜单仍打开（需要重绘）
+    StillOpen,
+    /// 菜单已关闭（继续游戏或进入子菜单）
+    Closed,
+    /// 退出游戏（is_running 已被设为 false）
+    ExitGame,
 }
 
 impl App {
@@ -215,9 +236,17 @@ impl App {
     /// - `Err(RuntimeError)`: 加载/解析/编译失败
     pub fn load(project_root: &Path) -> Result<Self, RuntimeError> {
         // 规范化项目根目录为绝对路径
-        let project_root = project_root
-            .canonicalize()
-            .unwrap_or_else(|_| project_root.to_path_buf());
+        let project_root = match project_root.canonicalize() {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!(
+                    "[App] 无法规范化项目路径 \"{}\"：{}，使用原始路径继续",
+                    project_root.display(),
+                    e
+                );
+                project_root.to_path_buf()
+            }
+        };
 
         // 步骤 1：加载游戏清单（aster.toml + characters/ + scripts/）
         let manifest = GameLoader::load(&project_root)?;
@@ -271,6 +300,9 @@ impl App {
             asset_manager: None,
             save_manager: None,
             save_ui_mode: None,
+            // PH2-T09: 暂停菜单初始状态
+            pause_menu_open: false,
+            pause_menu_selected: 0,
         })
     }
 
@@ -333,7 +365,7 @@ impl App {
             .unwrap_or_else(|e| panic!("GPU 初始化失败：{e}"));
         let format = gpu.surface_config().format;
 
-        // 步骤 2：创建渲染器
+        // 步骤 2：创建渲染器（AssetManager 在步骤 4 创建后注入）
         let mut renderer = GameRenderer::new(
             gpu.device(),
             gpu.queue(),
@@ -344,20 +376,11 @@ impl App {
             None, // AssetManager 在下面创建后注入
         );
 
-        // 步骤 3：创建场景管理器并加载入口场景
-        let ctx = self.game_context.clone();
-        let entry_scene_id = self.game_context.entry_scene_id.clone();
-        let mut manager = SceneManager::new(ctx);
-        manager
-            .load_scene(&entry_scene_id)
-            .unwrap_or_else(|e| panic!("加载入口场景 '{}' 失败：{e}", entry_scene_id));
+        // ─── PH2-T09 修复：子系统必须在首帧 update 之前初始化 ──────
+        // 原有 bug：音频/资源在首帧执行后才初始化，导致 music 命令
+        // 在首帧中变成空操作，BGM 无声。
 
-        // 步骤 4：执行首帧 VM（到第一个对话/菜单暂停点）
-        let _ = manager.update(Some(&mut renderer));
-
-        // ─── PH2-T08: 子系统初始化 ────────────────────────────────────
-
-        // 初始化音频系统
+        // 步骤 3：初始化音频系统（必须在首帧前）
         let mut audio_impl = match AudioSystemImpl::new() {
             Ok(a) => {
                 log::info!("[App] 音频系统初始化成功");
@@ -368,12 +391,13 @@ impl App {
                 None
             }
         };
-        // 设置默认音量（从 GameSettings 读取）
-        if let Some(ref mut audio) = audio_impl {
-            let _ = audio; // 占位，后续从 GameSettings 读取
+        // 设置默认音量
+        // AudioSystem 构造函数默认 bgm/se 音量均为 0.8（合理默认值）
+        if let Some(ref mut _audio) = audio_impl {
+            log::debug!("[App] 音频系统就绪，BGM/SE 默认音量: 0.8");
         }
 
-        // 初始化资源管理器
+        // 步骤 4：初始化资源管理器（必须在首帧前，需要 Device/Queue）
         let asset_mgr = {
             let mut mgr = aster_asset::AssetManager::new(self.project_root.clone());
             match mgr.scan_assets() {
@@ -396,14 +420,19 @@ impl App {
             Arc::new(Mutex::new(mgr))
         };
 
-        // 初始化存档管理器（存档目录 = project_root/save）
+        // 步骤 5：初始化存档管理器（存档目录 = project_root/save）
         let save_mgr = {
             let save_dir = self.project_root.join("save");
             let _ = fs::create_dir_all(&save_dir);
             Arc::new(SaveManager::new(save_dir))
         };
 
-        // 注入子系统到 SceneManager
+        // 步骤 6：创建场景管理器并加载入口场景
+        let ctx = self.game_context.clone();
+        let entry_scene_id = self.game_context.entry_scene_id.clone();
+        let mut manager = SceneManager::new(ctx);
+
+        // 注入子系统到 SceneManager（在 load_scene 和 update 之前）
         if let Some(audio) = audio_impl {
             manager.set_audio_system(Box::new(audio));
         }
@@ -412,6 +441,13 @@ impl App {
 
         // 注入 AssetManager 到渲染器（用于纹理加载+LRU 缓存）
         renderer.set_asset_manager(asset_mgr.clone());
+
+        manager
+            .load_scene(&entry_scene_id)
+            .unwrap_or_else(|e| panic!("加载入口场景 '{}' 失败：{e}", entry_scene_id));
+
+        // 步骤 7：执行首帧 VM（现在音频/资源/存档子系统已就绪）
+        let _ = manager.update(Some(&mut renderer));
 
         self.gpu_context = Some(gpu);
         self.renderer = Some(renderer);
@@ -571,11 +607,15 @@ impl App {
     // ========================================================================
 
     /// 进入存档菜单。
-    pub fn enter_save_menu(&mut self) {
+    ///
+    /// # 返回值
+    /// - `true`: 存档菜单已成功打开
+    /// - `false`: 打开失败（save_manager 未初始化等），调用方应保持当前 UI 状态
+    pub fn enter_save_menu(&mut self) -> bool {
         if let Some(ref mut mgr) = self.scene_manager {
             if let Err(e) = mgr.enter_save_menu() {
                 log::error!("[App] 打开存档菜单失败: {}", e);
-                return;
+                return false;
             }
             self.save_ui_mode = Some(SaveUiMode::Save);
             // 渲染 Save UI 命令到渲染器
@@ -583,21 +623,31 @@ impl App {
                 let commands = mgr.save_ui().render_commands();
                 rnd.render_save_ui(&commands);
             }
+            true
+        } else {
+            false
         }
     }
 
     /// 进入读档菜单。
-    pub fn enter_load_menu(&mut self) {
+    ///
+    /// # 返回值
+    /// - `true`: 读档菜单已成功打开
+    /// - `false`: 打开失败（save_manager 未初始化等），调用方应保持当前 UI 状态
+    pub fn enter_load_menu(&mut self) -> bool {
         if let Some(ref mut mgr) = self.scene_manager {
             if let Err(e) = mgr.enter_load_menu() {
                 log::error!("[App] 打开读档菜单失败: {}", e);
-                return;
+                return false;
             }
             self.save_ui_mode = Some(SaveUiMode::Load);
             if let Some(ref mut rnd) = self.renderer {
                 let commands = mgr.save_ui().render_commands();
                 rnd.render_save_ui(&commands);
             }
+            true
+        } else {
+            false
         }
     }
 
@@ -628,15 +678,23 @@ impl App {
                 match mgr.handle_save_ui_input(action, mode, &mut rnd) {
                     Ok(loaded) => loaded,
                     Err(e) => {
+                        // 将错误信息推送到 SaveUi 错误状态，用户可看到红色提示
                         log::error!("[App] 存档操作失败: {}", e);
-                        return;
+                        let err_msg = e.to_string();
+                        // 提取核心错误信息（去掉外层 RuntimeError 前缀）
+                        let display_msg = err_msg
+                            .strip_prefix("存档操作错误：")
+                            .unwrap_or(&err_msg)
+                            .to_string();
+                        mgr.set_save_ui_error(&display_msg, mode);
+                        false
                     }
                 }
             }
             None => return,
         };
 
-        // 刷新 UI 渲染
+        // 刷新 UI 渲染（含错误状态）
         if let (Some(mgr), Some(rnd)) = (&self.scene_manager, &mut self.renderer) {
             if mgr.is_save_ui_open() {
                 let commands = mgr.save_ui().render_commands();
@@ -704,6 +762,7 @@ impl App {
             Ok(data) => data,
             Err(e) => {
                 log::error!("[App] 快速读档失败: {}", e);
+                eprintln!("❌ 快速读档失败: {e}");
                 return;
             }
         };
@@ -720,6 +779,7 @@ impl App {
                 let mut rnd_opt: Option<&mut dyn RendererTrait> = Some(rnd);
                 if let Err(e) = mgr.restore_game_state(&save_data, &mut rnd_opt) {
                     log::error!("[App] 游戏状态恢复失败: {}", e);
+                    eprintln!("❌ 游戏状态恢复失败: {e}");
                     return;
                 }
             }
@@ -739,6 +799,169 @@ impl App {
     #[inline]
     pub fn is_save_ui_open(&self) -> bool {
         self.save_ui_mode.is_some()
+    }
+
+    // ========================================================================
+    // PH2-T09: 暂停菜单
+    // ========================================================================
+
+    /// 暂停菜单项标签。
+    const PAUSE_MENU_ITEMS: [&'static str; 4] = ["继续游戏", "存档", "读档", "退出游戏"];
+
+    /// 打开暂停菜单。
+    ///
+    /// 暂停当前游戏，显示 4 项菜单供玩家选择。
+    /// 通过 Renderer 的 `render_pause_menu` 渲染 UI 叠加层。
+    pub fn open_pause_menu(&mut self) {
+        self.pause_menu_open = true;
+        self.pause_menu_selected = 0;
+        self.render_pause_menu_commands();
+    }
+
+    /// 关闭暂停菜单，返回游戏。
+    pub fn close_pause_menu(&mut self) {
+        self.pause_menu_open = false;
+        if let Some(ref mut rnd) = self.renderer {
+            rnd.clear_pause_menu();
+        }
+    }
+
+    /// 检查暂停菜单是否打开。
+    #[inline]
+    pub fn is_pause_menu_open(&self) -> bool {
+        self.pause_menu_open
+    }
+
+    /// 生成暂停菜单的 UiCommand 列表并发送到渲染器。
+    fn render_pause_menu_commands(&mut self) {
+        let commands = self.build_pause_menu_commands();
+        if let Some(ref mut rnd) = self.renderer {
+            rnd.render_pause_menu(&commands);
+        }
+    }
+
+    /// 构建暂停菜单的 UiCommand 列表。
+    ///
+    /// 包含 4 个菜单项，当前选中项高亮（黄色 + ">" 前缀）。
+    fn build_pause_menu_commands(&self) -> Vec<aster_save::UiCommand> {
+        use aster_save::UiCommand;
+
+        let mut commands = vec![
+            // 半透明背景遮罩
+            UiCommand::Overlay { alpha: 0.7 },
+            // 标题
+            UiCommand::Text {
+                content: "— 暂停菜单 —".to_string(),
+                x: 560.0,
+                y: 160.0,
+                font_size: 28.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+                selected: false,
+            },
+        ];
+
+        // 菜单项
+        for (i, item) in Self::PAUSE_MENU_ITEMS.iter().enumerate() {
+            let is_selected = i == self.pause_menu_selected;
+            let color = if is_selected {
+                [1.0, 0.85, 0.0, 1.0] // 黄色高亮
+            } else {
+                [0.7, 0.7, 0.7, 1.0] // 灰色
+            };
+            commands.push(UiCommand::Text {
+                content: item.to_string(),
+                x: 560.0,
+                y: 240.0 + i as f32 * 50.0,
+                font_size: 22.0,
+                color,
+                selected: is_selected,
+            });
+        }
+
+        // 底部操作提示
+        commands.push(UiCommand::Text {
+            content: "↑↓ 选择  Enter 确认  ESC 返回".to_string(),
+            x: 530.0,
+            y: 520.0,
+            font_size: 16.0,
+            color: [0.5, 0.5, 0.5, 1.0],
+            selected: false,
+        });
+
+        commands
+    }
+
+    /// 处理暂停菜单中的用户输入。
+    ///
+    /// # 参数
+    /// - `action`: 输入动作（Up/Down/Advance/OpenMenu）
+    ///
+    /// # 返回值
+    /// `PauseMenuResult` 指示菜单状态变化，调用方据此决定后续行为。
+    pub fn handle_pause_menu_action(&mut self, action: GameAction) -> PauseMenuResult {
+        match action {
+            GameAction::Up => {
+                if self.pause_menu_selected > 0 {
+                    self.pause_menu_selected -= 1;
+                } else {
+                    self.pause_menu_selected = Self::PAUSE_MENU_ITEMS.len() - 1;
+                }
+                self.render_pause_menu_commands();
+                PauseMenuResult::StillOpen
+            }
+            GameAction::Down => {
+                if self.pause_menu_selected + 1 < Self::PAUSE_MENU_ITEMS.len() {
+                    self.pause_menu_selected += 1;
+                } else {
+                    self.pause_menu_selected = 0;
+                }
+                self.render_pause_menu_commands();
+                PauseMenuResult::StillOpen
+            }
+            GameAction::Advance => {
+                // 确认选择
+                match self.pause_menu_selected {
+                    0 => {
+                        // 继续游戏
+                        self.close_pause_menu();
+                        PauseMenuResult::Closed
+                    }
+                    1 => {
+                        // 存档 — 先打开存档菜单，成功后再关闭暂停菜单
+                        // 若存档菜单打开失败（save_manager 未初始化等），
+                        // 保持暂停菜单打开，用户仍可看到界面并选择其他操作
+                        if self.enter_save_menu() {
+                            self.close_pause_menu();
+                            PauseMenuResult::Closed
+                        } else {
+                            PauseMenuResult::StillOpen
+                        }
+                    }
+                    2 => {
+                        // 读档 — 同理，先打开读档菜单，成功后再关闭暂停菜单
+                        if self.enter_load_menu() {
+                            self.close_pause_menu();
+                            PauseMenuResult::Closed
+                        } else {
+                            PauseMenuResult::StillOpen
+                        }
+                    }
+                    3 => {
+                        // 退出游戏
+                        self.close_pause_menu();
+                        self.is_running = false;
+                        PauseMenuResult::ExitGame
+                    }
+                    _ => PauseMenuResult::StillOpen,
+                }
+            }
+            GameAction::OpenMenu | GameAction::Quit => {
+                // ESC → 返回游戏
+                self.close_pause_menu();
+                PauseMenuResult::Closed
+            }
+            _ => PauseMenuResult::StillOpen, // 其他按键忽略
+        }
     }
 
     // ========================================================================

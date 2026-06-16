@@ -74,6 +74,23 @@ pub trait Renderer {
     /// 移除之前通过 `render_save_ui()` 渲染的所有 UI 元素。
     /// 默认实现为空操作。
     fn clear_save_ui(&mut self) {}
+
+    // ─── PH2-T09: 暂停菜单 ────────────────────────────────────────────────
+
+    /// 渲染暂停菜单（"继续游戏"/"存档"/"读档"/"退出游戏"）。
+    ///
+    /// 将 `UiCommand` 列表翻译为实际的 GPU 渲染调用。
+    /// 默认实现为空操作。
+    fn render_pause_menu(&mut self, _commands: &[aster_save::UiCommand]) {}
+    /// 清除暂停菜单渲染。
+    ///
+    /// 默认实现为空操作。
+    fn clear_pause_menu(&mut self) {}
+
+    /// 清除所有角色立绘（供存档恢复前清理旧状态使用）。
+    ///
+    /// 默认实现为空操作。
+    fn clear_all_characters(&mut self) {}
 }
 
 /// 抽象音频系统接口 — 供 `CommandBridge` 调用的音频操作集合。
@@ -118,28 +135,34 @@ pub trait AudioSystem {
 
     /// 播放 BGM — 从 AssetManager 解码的 PCM 数据。
     ///
-    /// 默认实现返回错误。支持 AssetManager 集成的实现应覆盖此方法。
+    /// `asset_path` 为实际文件路径（如 `assets/bgm/bgm_daily_life.mp3`），
+    /// 用于存档时记录真实路径，确保读档恢复时能找到文件。
+    ///
+    /// **必须实现**：此方法无默认实现。每个 `AudioSystem` 实现者必须提供真实逻辑。
+    /// 若忽略此方法，编译期即会报错（而非运行时才发现）。
     fn play_bgm_from_pcm(
         &mut self,
-        _samples: &[f32],
-        _sample_rate: u32,
-        _channels: u16,
-        _looping: bool,
-        _fade_in: f64,
-    ) -> Result<(), String> {
-        Err("PCM 播放未实现".into())
-    }
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        looping: bool,
+        fade_in: f64,
+        asset_path: &str,
+    ) -> Result<(), String>;
 
     /// 播放 SE — 从 AssetManager 解码的 PCM 数据。
+    ///
+    /// `asset_path` 为实际文件路径。
+    ///
+    /// **必须实现**：此方法无默认实现。每个 `AudioSystem` 实现者必须提供真实逻辑。
     fn play_se_from_pcm(
         &mut self,
-        _samples: &[f32],
-        _sample_rate: u32,
-        _channels: u16,
-        _fade_in: f64,
-    ) -> Result<(), String> {
-        Err("PCM 播放未实现".into())
-    }
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        fade_in: f64,
+        asset_path: &str,
+    ) -> Result<(), String>;
 
     /// 获取当前音频系统的完整状态快照。
     ///
@@ -328,14 +351,12 @@ fn fade_reg_value(fade_reg: &u8) -> f64 {
 
 /// 解析音频资源路径 — 将脚本中的裸名称映射到实际文件路径。
 ///
-/// 例如 `"bgm_daily_life"` + `"bgm"` → `"assets/bgm/bgm_daily_life.wav"`
+/// 不再硬编码 `.wav` 扩展名。当 asset 不含扩展名时返回无扩展名路径，
+/// 由下游的 AudioSystem::load_sound_data 负责扩展名回退（.wav/.mp3/.ogg/.flac）。
+///
+/// 例如 `"bgm_daily_life"` + `"bgm"` → `"assets/bgm/bgm_daily_life"`
 pub fn resolve_audio_path(asset: &str, prefix: &str) -> String {
-    if asset.contains('.') {
-        // 已含扩展名，不追加
-        format!("assets/{}/{}", prefix, asset)
-    } else {
-        format!("assets/{}/{}.wav", prefix, asset)
-    }
+    format!("assets/{}/{}", prefix, asset)
 }
 
 fn resolve_emotion_path(ctx: &GameContext, char_id: &str, emotion: &str) -> String {
@@ -457,6 +478,15 @@ impl Renderer for MockRenderer {
     fn clear_save_ui(&mut self) {
         self.calls.push("clear_save_ui()".to_string());
     }
+
+    fn render_pause_menu(&mut self, commands: &[aster_save::UiCommand]) {
+        self.calls
+            .push(format!("render_pause_menu({} commands)", commands.len()));
+    }
+
+    fn clear_pause_menu(&mut self) {
+        self.calls.push("clear_pause_menu()".to_string());
+    }
 }
 
 // ============================================================================
@@ -534,6 +564,46 @@ impl AudioSystem for MockAudioSystem {
     fn set_se_volume(&mut self, volume: f32) {
         self.se_volume = volume;
         self.calls.push(format!("set_se_volume({})", volume));
+    }
+
+    fn play_bgm_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        looping: bool,
+        fade_in: f64,
+        asset_path: &str,
+    ) -> Result<(), String> {
+        self.calls.push(format!(
+            "play_bgm_from_pcm(path=\"{}\", samples={}, rate={}, ch={}, looping={}, fade_in={})",
+            asset_path,
+            samples.len(),
+            sample_rate,
+            channels,
+            looping,
+            fade_in
+        ));
+        Ok(())
+    }
+
+    fn play_se_from_pcm(
+        &mut self,
+        samples: &[f32],
+        sample_rate: u32,
+        channels: u16,
+        fade_in: f64,
+        asset_path: &str,
+    ) -> Result<(), String> {
+        self.calls.push(format!(
+            "play_se_from_pcm(path=\"{}\", samples={}, rate={}, ch={}, fade_in={})",
+            asset_path,
+            samples.len(),
+            sample_rate,
+            channels,
+            fade_in
+        ));
+        Ok(())
     }
 
     fn get_state(&self) -> aster_core::save::AudioSnapshot {

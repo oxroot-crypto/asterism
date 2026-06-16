@@ -189,20 +189,59 @@ impl ApplicationHandler for EventLoop {
         let action = app.process_input(&event);
         match action {
             GameAction::Advance => {
-                app.advance();
-                // 检查是否是场景结束导致的退出
-                if !app.is_running {
-                    event_loop.exit();
+                // PH2-T09: 如果保存 UI 开着，路由到保存 UI（Enter 确认）
+                if app.is_save_ui_open() {
+                    app.handle_save_ui_input(aster_save::UiAction::Confirm);
+                    app.request_redraw();
+                } else if app.is_pause_menu_open() {
+                    let result = app.handle_pause_menu_action(GameAction::Advance);
+                    if result == crate::app::PauseMenuResult::ExitGame {
+                        event_loop.exit();
+                    }
+                } else {
+                    app.advance();
+                    // 检查是否是场景结束导致的退出
+                    if !app.is_running {
+                        event_loop.exit();
+                    }
                 }
             }
-            GameAction::Quit | GameAction::OpenMenu => {
-                // PH2-T08: 如果 Save UI 打开，先关闭 Save UI
+            GameAction::OpenMenu => {
+                // PH2-T09: 层级式 UI 状态机
+                // ESC 优先级：保存 UI → 暂停菜单 → 打开暂停菜单
                 if app.is_save_ui_open() {
+                    // 关闭保存 UI，回到暂停菜单
                     app.close_save_ui();
+                    app.open_pause_menu();
+                } else if app.is_pause_menu_open() {
+                    app.close_pause_menu();
                 } else {
-                    app.is_running = false;
-                    event_loop.exit();
+                    // 游戏进行中 → 打开暂停菜单
+                    app.open_pause_menu();
                 }
+            }
+            GameAction::Quit => {
+                // Alt+F4 / 窗口关闭 → 直接退出
+                app.is_running = false;
+                event_loop.exit();
+            }
+            GameAction::Up | GameAction::Down => {
+                // PH2-T09: 菜单导航（↑↓ 键）
+                if app.is_save_ui_open() {
+                    let ui_action = match action {
+                        GameAction::Up => aster_save::UiAction::Up,
+                        GameAction::Down => aster_save::UiAction::Down,
+                        _ => unreachable!(),
+                    };
+                    app.handle_save_ui_input(ui_action);
+                    app.request_redraw();
+                } else if app.is_pause_menu_open() {
+                    let result = app.handle_pause_menu_action(action);
+                    if result == crate::app::PauseMenuResult::ExitGame {
+                        event_loop.exit();
+                    }
+                }
+                // 游戏中忽略上下键
             }
             GameAction::Skip | GameAction::Auto | GameAction::ToggleFullscreen => {
                 // Phase 1 预留，后续 Phase 实现

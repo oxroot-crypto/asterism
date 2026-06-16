@@ -58,6 +58,10 @@ pub struct GameRenderer {
     save_ui_active: bool,
     /// PH2-T08: 存档/读档 UI 格式化后的文本
     save_ui_text: String,
+    /// PH2-T09: 暂停菜单是否激活
+    pause_menu_active: bool,
+    /// PH2-T09: 暂停菜单格式化后的文本
+    pause_menu_text: String,
     /// PH2-T08: 资源管理器（用于统一资源加载+LRU 缓存）
     asset_manager: Option<Arc<Mutex<AssetManager>>>,
 }
@@ -105,6 +109,8 @@ impl GameRenderer {
             screen_height,
             save_ui_active: false,
             save_ui_text: String::new(),
+            pause_menu_active: false,
+            pause_menu_text: String::new(),
             asset_manager,
         }
     }
@@ -148,16 +154,41 @@ impl GameRenderer {
         self.sprite_back.render(encoder, output_view);
         self.sprite_front.render(encoder, output_view);
 
-        // 文本
-        self.text_renderer.render(encoder, output_view);
+        // 文本（叠加层激活时跳过对话渲染，避免文本透过半透明遮罩可见）
+        // 保存当前对话状态（叠加层会临时覆盖 text_renderer）
+        let (dialogue_speaker, dialogue_body) = {
+            let (s, b) = self.text_renderer.current_text();
+            (s.to_string(), b.to_string())
+        };
+        let has_overlay = (self.save_ui_active && !self.save_ui_text.is_empty())
+            || (self.pause_menu_active && !self.pause_menu_text.is_empty());
+
+        if !has_overlay {
+            self.text_renderer.render(encoder, output_view);
+        }
 
         // PH2-T08: Save UI 叠加层
-        // 如果存档/读档 UI 激活，将 UI 文本渲染为叠加层
+        // 注意：每帧必须 set_text + prepare，因为上方的 dialogue prepare()
+        // 已覆盖字形缓冲区，set_text() 会使旧布局失效，必须重新 prepare。
         if self.save_ui_active && !self.save_ui_text.is_empty() {
             self.text_renderer.set_text("", &self.save_ui_text);
             self.text_renderer.set_visible_range(0, usize::MAX);
             self.text_renderer.prepare(&self.device, &self.queue);
             self.text_renderer.render(encoder, output_view);
+        }
+
+        // PH2-T09: 暂停菜单叠加层
+        if self.pause_menu_active && !self.pause_menu_text.is_empty() {
+            self.text_renderer.set_text("", &self.pause_menu_text);
+            self.text_renderer.set_visible_range(0, usize::MAX);
+            self.text_renderer.prepare(&self.device, &self.queue);
+            self.text_renderer.render(encoder, output_view);
+        }
+
+        // 恢复对话文本状态，确保叠加层关闭后下一帧重新排版对话文本
+        if has_overlay {
+            self.text_renderer
+                .restore_dialogue_text(&dialogue_speaker, &dialogue_body);
         }
     }
 
@@ -307,6 +338,21 @@ impl GameRenderer {
     /// 加载纹理 — 优先通过 AssetManager（含 LRU 缓存），fallback 到直接文件加载。
     ///
     /// 路径相对于项目根目录（如 "assets/bg/classroom.png"）。
+    ///
+    /// # 缓存层级说明
+    ///
+    /// 纹理存在两级缓存：
+    /// 1. AssetManager LRU 缓存（跨子系统共享，持有 wgpu Texture）
+    /// 2. 本地 `texture_cache`（HashMap<String, Texture>，持有 aster-renderer Texture 包装）
+    ///
+    /// 两级缓存各司其职：AssetManager 管理原始 GPU 纹理的生命周期和预算，
+    /// 本地缓存避免每帧重新创建 `Texture` 包装和 `TextureView`。
+    /// wgpu Texture 内部使用 Arc，clone 开销极低。
+    ///
+    /// 已知限制：当 `set_background()` 从本地缓存 remove 纹理时，
+    /// AssetManager 中对应的 wgpu Texture 引用仍保留。
+    /// 这导致 AssetManager 的预算计数器略微偏高，但不浪费 GPU 内存（Arc 共享）。
+    /// 未来可添加 `AssetManager::release()` 方法通知 LRU 缓存释放引用。
     fn load_texture(&mut self, path: &str) -> Option<&Texture> {
         // 步骤 1：本地缓存
         if self.texture_cache.contains_key(path) {
@@ -315,16 +361,17 @@ impl GameRenderer {
 
         // 步骤 2：通过 AssetManager 加载（含 LRU 缓存）
         if let Some(ref asset_mgr) = self.asset_manager {
-            let mut mgr = asset_mgr.lock().unwrap();
+            // Mutex poison 恢复：若其他线程 panic 导致锁中毒，仍可安全取回内部数据。
+            // AssetManager 不变量由单线程（事件循环）保证，中毒不会破坏数据一致性。
+            let mut mgr = asset_mgr
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             let path_std = std::path::Path::new(path);
             if let Some(asset_id) = mgr.find_by_path(path_std)
                 && let Ok(cached) = mgr.load(asset_id)
-                && let aster_asset::LoadedAsset::Texture { size, .. } = &cached.data
+                && let aster_asset::LoadedAsset::Texture { size, texture, .. } = &cached.data
             {
-                let gpu_tex = match &cached.data {
-                    aster_asset::LoadedAsset::Texture { texture, .. } => texture,
-                    _ => unreachable!(),
-                };
+                let gpu_tex = texture;
                 let gpu_view = gpu_tex.create_view(&wgpu::TextureViewDescriptor::default());
                 let tex = Texture::from_wgpu_texture(
                     &self.device,
@@ -366,7 +413,10 @@ impl GameRenderer {
 impl Renderer for GameRenderer {
     fn set_background(&mut self, path: &str) {
         if self.load_texture(path).is_some() {
-            // 从缓存中取出纹理（所有权转移给 BackgroundLayer）
+            // 从本地缓存取出纹理（所有权转移给 BackgroundLayer）。
+            // 注意：AssetManager LRU 缓存仍持有 wgpu Texture 引用，
+            // 但因为 wgpu Texture 内部为 Arc，不会造成显存浪费。
+            // 详见 load_texture() 的"缓存层级说明"注释。
             if let Some(texture) = self.texture_cache.remove(path) {
                 self.bg_layer.set_background(&self.queue, texture);
                 // 重新以 id 为 key 插入缓存（set_background 后 BG 纹理由 bg_layer 拥有）
@@ -596,6 +646,51 @@ impl Renderer for GameRenderer {
     fn clear_save_ui(&mut self) {
         self.save_ui_active = false;
         self.save_ui_text.clear();
+    }
+
+    fn render_pause_menu(&mut self, commands: &[aster_save::UiCommand]) {
+        self.pause_menu_active = true;
+        // 将 UiCommand 列表格式化为可显示的文本
+        let mut text = String::new();
+        for cmd in commands {
+            if let aster_save::UiCommand::Text {
+                content, selected, ..
+            } = cmd
+            {
+                if *selected {
+                    text.push_str("> ");
+                } else {
+                    text.push_str("  ");
+                }
+                text.push_str(content);
+                text.push('\n');
+            }
+        }
+        self.pause_menu_text = text;
+    }
+
+    fn clear_pause_menu(&mut self) {
+        self.pause_menu_active = false;
+        self.pause_menu_text.clear();
+    }
+
+    fn clear_all_characters(&mut self) {
+        // 收集所有角色 ID 和精灵 ID（避免借用在迭代期间冲突）
+        let char_ids: Vec<String> = self.char_sprites.keys().cloned().collect();
+        let sprite_paths: Vec<String> = self.sprite_ids.keys().cloned().collect();
+        // 逐一隐藏角色
+        for char_id in &char_ids {
+            self.hide_character(char_id);
+        }
+        // 清除通用精灵（不使用 hide_sprite 因为需要特定实现对精灵存储的访问）
+        for path in &sprite_paths {
+            if let Some(&sprite_id) = self.sprite_ids.get(path) {
+                self.sprite_back.remove_sprite(sprite_id);
+                self.sprite_front.remove_sprite(sprite_id);
+            }
+        }
+        self.sprite_ids.clear();
+        self.char_sprites.clear();
     }
 }
 

@@ -1,575 +1,127 @@
--- prologue.aster — 示例场景脚本（SceneNode 25 变体 + Expr 插值完整演示）
--- Asterism（群星）— .aster DSL 完整语法参考
+-- prologue.aster — 序章：樱花树下的重逢
+-- Asterism（群星）引擎演示脚本
 --
--- 本脚本演示 SceneNode 枚举全部 25 种变体，以及 Expr 表达式在所有
--- 动态字段中的插值能力（变量引用、算术/比较/逻辑运算、字符串拼接、
--- 一元运算）。
---
---   SceneNode 25 变体分类：
---   渲染 (9):  Bg / ShowChar / ShowSprite / MoveChar / Emotion /
---              HideChar / HideSprite / Dialogue / Narration
---   交互 (1):  Menu
---   控制流 (6):  Branch / Jump / Goto / Call / Return / Label
---   状态 (4):  SetVariable / SetFlag / UnsetFlag / ToggleFlag
---   媒体 (4):  Music / StopMusic / PlaySE / Effect
---   时序 (1):  Wait
---
---   Expr 7 种 AST 节点：
---     StringLiteral("你好") / IntLiteral(42) / FloatLiteral(3.14)
---     BoolLiteral(true/false) / Variable($score)
---     BinaryOp($a + $b) / UnaryOp(not %flag, -$value)
---
---   BinaryOp 12 种运算符：+ - * /  == != < > <= >=  and or
---   UnaryOp  2 种运算符：not（逻辑非）  -（一元取负）
+-- 本脚本通过一个简短温馨的故事，自然地展示 .aster DSL 各项功能：
+--   背景切换、角色立绘、对话/旁白、表情变化、BGM/SE、
+--   变量/旗标、条件分支、选择菜单、跨场景跳转
 --
 -- 语法约定：缩进 2 空格、注释 --、字符串 "双引号"、变量 $前缀、旗标 %前缀
 
 scene "prologue" {
-    description: "序章 — 樱花树下的相遇（25 变体 + Expr 插值参考）"
+    description: "序章 — 樱花树下的重逢"
 
-    -- ==================================================================
-    -- §0  变量初始化 — 定义后续插值演示所需的变量
-    --     对应 Rust: SceneNode::SetVariable { name, value: Expr }
-    --     Expr 7 变体全覆盖: StringLiteral / IntLiteral / FloatLiteral /
-    --                       BoolLiteral / Variable / BinaryOp / UnaryOp
-    -- ==================================================================
+    -- ================================================================
+    -- 开场：四月清晨的教室
+    -- ================================================================
 
-    -- 0a) 整数字面量 (IntLiteral)
-    $score = 0
-    $affection_sayori = 2
-    $affection_akane = 1
-
-    -- 0b) 浮点数字面量 (FloatLiteral)
-    $fade_speed = 1.5
-    $base_delay = 500.0
-
-    -- 0c) 字符串字面量 (StringLiteral)
-    $player_name = "晓"
-    $current_bg = "bg_classroom_morning"
-    $current_bgm = "bgm_daily_life"
-
-    -- 0d) 布尔字面量 (BoolLiteral)
-    $unlocked_secret = false
-    $is_first_play = true
-
-    -- 0e) 变量引用 (Variable) — 右侧引用已有变量
-    $bg_backup = $current_bg
-
-    -- 0f) 二元运算 (BinaryOp) — 算术: + - * /
-    $score = $score + 10
-    $affection_sayori = $affection_sayori * 2
-    $half_akane = $affection_akane / 2
-    $adjusted = ($score - 5) * 3
-
-    -- 0g) 一元运算 (UnaryOp) — 逻辑非: not  /  算术取负: -
-    $debt = -500
-    $inverse = -$score
-    $is_game_over = false
-
-    -- 0h) 字符串拼接 (BinaryOp::Add)
-    $greeting = "你好，" + $player_name
-    -- 语音文件路径约定: assets/voices/<角色id>/<编号>.ogg
-    -- 此处构造编号部分，引擎根据当前说话角色 ID 自动拼接完整路径
-    $voice_index = 5
-    $voice_id = "000" + $voice_index
-
-    -- 0i) 角色/表情/位置变量（供后续 char_id / emotion / position 字段插值）
-    $char_heroine = "sayori"
-    $char_friend = "akane"
-    $emo_happy = "happy"
-    $emo_surprise = "surprise"
-    $pos_left_x = 0.25
-    $pos_mid_y = 0.5
-
-    -- 0j) 跳转目标变量（供 Jump / Goto target 字段插值）
-    $next_scene = "chapter1/sakura_road"
-    $next_label = "main_flow"
-
-    -- ==================================================================
-    -- §1  Bg — 设置/切换场景背景
-    --     对应 Rust: SceneNode::Bg { asset_path: Expr, transition? }
-    --     asset_path    — 支持字面量 / 变量 / 字符串拼接
-    --     transition    — duration_ms 字段支持表达式
-    -- ==================================================================
-
-    -- 1a) 字面量路径
-    bg "bg_classroom_morning"
-
-    -- 1b) 变量路径（§0 中 $current_bg = "bg_classroom_morning"）
-    bg $current_bg
-
-    -- 1c) 带转场 — duration_ms 用表达式
-    bg "bg_sakura_road_afternoon" with fade($fade_speed * 1000)
-    bg "bg_park_evening" with dissolve(1200)
-
-    -- ==================================================================
-    -- §2  Music — 播放/切换背景音乐
-    --     对应 Rust: SceneNode::Music { asset_path: Expr, fade_in?: Expr, looping }
-    --     asset_path / fade_in 均支持变量和表达式
-    -- ==================================================================
-
-    -- 2a) 字面量
-    music "bgm_daily_life"
-
-    -- 2b) 变量路径 + 变量淡入时间
-    music $current_bgm fade_in: $fade_speed
-
-    -- 2c) fade_in 用表达式
-    music "bgm_tender_moment" fade_in: $fade_speed * 0.5
-
-    -- 2d) 显式关闭循环（标题画面 BGM 等）
-    music "bgm_title_theme" fade_in: 1.0 looping: false
-
-    -- ==================================================================
-    -- §3  PlaySE — 播放音效（不阻断执行）
-    --     对应 Rust: SceneNode::PlaySE { asset_id: Expr, fade_in?: Expr }
-    -- ==================================================================
-
-    -- 3a) 字面量
+    bg "bg_classroom_morning" with fade(1.5)
+    music "bgm_daily_life" fade_in: 2.0
     se "se_birds_chirping"
 
-    -- 3b) 变量路径（§0 中已定义变量也可用于 se）
-    $se_ambient = "se_rain_ambient"
-    se $se_ambient fade_in: 0.5
+    narration "那是四月的一个清晨。"
+    narration "时隔三年，我再次回到了这座被樱花簇拥的南方小镇。"
+    narration "教室的窗外，几片花瓣正随着微风轻轻飘入。"
+    narration "一切都那么熟悉，又那么陌生。"
 
-    se "se_bell_ring"
-    se "se_door_open"
+    -- ================================================================
+    -- 变量初始化
+    --   变量可在对话中通过 $变量名 插值
+    --   旗标以 % 为前缀，用于追踪跨场景事件状态
+    -- ================================================================
 
-    -- ==================================================================
-    -- §4  ShowChar — 在舞台上显示角色立绘
-    --     对应 Rust: SceneNode::ShowChar { char_id: Expr, position, emotion?: Expr, transition? }
-    --     char_id   — 支持字面量 / 变量 / 字符串拼接
-    --     position  — left / center / right / (Expr, Expr) 自定义坐标
-    --     emotion   — 字面量 / 变量
-    -- ==================================================================
+    $player_name = "晓"
+    $affection_sayori = 3
+    $affection_akane = 2
 
-    -- 4a) 字面量 char_id + 预设位置
-    show sayori at center with fade(0.8)
+    -- ================================================================
+    -- 青梅竹马·小百合登场
+    --   show 显示角色立绘  |  emotion 切换表情
+    --   char_id 直接作为语句关键字进行对话
+    -- ================================================================
 
-    -- 4b) 变量 char_id + 变量 emotion
-    --     §0 中: $char_friend = "akane", $emo_happy = "happy"
-    show $char_friend at right emotion: $emo_happy with dissolve(0.5)
-
-    -- 4c) 自定义坐标用变量
-    --     §0 中: $pos_left_x = 0.25, $pos_mid_y = 0.5
-    show sayori at ($pos_left_x, $pos_mid_y) with fade($fade_speed * 1000)
-
-    -- ==================================================================
-    -- §5  Dialogue — 角色对话（暂停，等待玩家点击）
-    --     对应 Rust: SceneNode::Dialogue { speaker: Expr, text: Expr, voice_id?: Expr }
-    --     speaker / text / voice_id 三个字段均为 Expr，支持完整插值
-    -- ==================================================================
-
-    -- 5a) 字面量 text
-    sayori "今天天气真好啊。"
-
-    -- 5b) text 用字符串拼接 — 变量值嵌入对话
-    akane "我是" + $char_friend + "！好感度当前为 " + $affection_akane + " 点。"
-
-    -- 5c) 布尔变量拼接到文本
-    if $is_first_play {
-        narration "检测到首次游玩。欢迎，" + $player_name + "！"
-    }
-
-    -- 5d) voice_id 用表达式（§0 中: $voice_id = "0005"）
-    sayori "这句话的语音文件由表达式动态生成。" voice: $voice_id
-
-    -- ==================================================================
-    -- §6  Narration — 旁白（无说话者，居中/斜体样式）
-    --     对应 Rust: SceneNode::Narration { text: Expr }
-    --     text 支持字面量 / 变量拼接 / 多变量混合
-    -- ==================================================================
-
-    -- 6a) 字面量
-    narration "那是樱花盛开的四月。时隔三年，我再次踏入了这座小镇。"
-
-    -- 6b) 变量拼接 — 数值动态嵌入旁白
-    narration "小百合好感度: " + $affection_sayori + "，小茜好感度: " + $affection_akane
-
-    -- 6c) 完全由变量组成的旁白
-    narration $greeting + "，欢迎回来。"
-
-    -- ==================================================================
-    -- §7  Emotion — 原地切换角色立绘表情（不改变位置）
-    --     对应 Rust: SceneNode::Emotion { char_id: Expr, emotion: Expr, transition? }
-    --     char_id / emotion 字段均可用变量（动态角色 + 动态表情）
-    -- ==================================================================
-
-    -- 7a) 字面量
+    show sayori at center with fade(1.0)
     emotion sayori "smile"
 
-    -- 7b) 变量 emotion（§0 中 $emo_surprise = "surprise"）
-    emotion sayori $emo_surprise with dissolve(0.3)
+    sayori "早上好，" + $player_name + "。"
+    sayori "好久不见……你真的回来了呢。"
 
-    -- 7c) 变量 char_id + 变量 emotion
-    emotion $char_friend "laugh"
-    emotion $char_friend "wink" with dissolve(0.2)
+    emotion sayori "happy"
+    sayori "我还以为再也见不到你了！"
+    sayori "这三年，我一直……一直在等你回来。"
 
-    -- ==================================================================
-    -- §8  MoveChar — 将已显示角色平滑移动到新位置
-    --     对应 Rust: SceneNode::MoveChar { char_id: Expr, position, emotion?: Expr, transition }
-    --     与 Emotion 区别：MoveChar 改变位置（可选同步切换表情）
-    --     position 自定义坐标 (Expr, Expr) 支持变量
-    -- ==================================================================
+    -- 好感度微增（变量运算）
+    $affection_sayori = $affection_sayori + 1
 
-    -- 8a) 字面量 + 预设位置
-    move sayori to left with slide(left, 0.8)
+    -- ================================================================
+    -- 元气少女·小茜登场
+    --   show 支持自定义位置: left / center / right
+    --   也支持自定义坐标: (x, y)（0.0~1.0 相对窗口比例）
+    -- ================================================================
 
-    -- 8b) 变量 char_id + 变量 emotion + 表达式 duration
-    move $char_friend to center emotion: "embarrassed" with slide(right, $base_delay * 2 / 1000)
+    se "se_door_open"
+    show akane at right with dissolve(0.6)
+    emotion akane "happy"
 
-    -- 8c) 自定义坐标用变量（带偏移）
-    move sayori to ($pos_left_x, $pos_mid_y - 0.05) with slide(left, 0.6)
+    akane "哟！你就是传说中的转学生吧？"
+    akane "我是小茜，坐在你隔壁，请多指教啦！"
 
-    -- 还原位置
-    move sayori to center with dissolve($fade_speed * 1000)
-    move akane to right with dissolve(0.4)
+    emotion sayori "surprise"
+    sayori "小、小茜？你什么时候进来的……"
 
-    -- ==================================================================
-    -- §9  ShowSprite — 显示独立精灵（道具/贴纸/图标，不绑定角色）
-    --     对应 Rust: SceneNode::ShowSprite { asset_path: Expr, x: Expr, y: Expr,
-    --                                         scale: Expr, alpha: Expr, transition? }
-    --     所有数值字段均支持变量和表达式
-    -- ==================================================================
+    emotion akane "laugh"
+    akane "哈哈，就在刚才啊！小百合你太专注了都没发现吧？"
 
-    -- 9a) 全字面量
-    sprite "ui/icon_heart.png" at (0.9, 0.05)
+    -- ================================================================
+    -- 上课铃 — 场景过渡
+    --   se 播放音效（不阻塞）  |  wait 暂停（毫秒）
+    -- ================================================================
 
-    -- 9b) 变量路径 + 表达式 alpha（好感度越高越透明——反向示例）
-    $icon_star = "ui/icon_star.png"
-    sprite $icon_star at (0.1, 0.1) scale: 0.5 alpha: 0.7
-
-    -- 9c) alpha 用算术表达式
-    sprite "ui/cg_overlay.png" at (0.5, 0.5) alpha: $affection_sayori / 10 with fade(1.0)
-
-    -- ==================================================================
-    -- §10 HideSprite — 隐藏独立精灵
-    --      对应 Rust: SceneNode::HideSprite { asset_path: Expr, transition? }
-    --      asset_path 支持变量匹配（与 ShowSprite 对应）
-    -- ==================================================================
-
-    -- 10a) 字面量
-    usprite "ui/icon_heart.png"
-
-    -- 10b) 变量路径 + 转场 duration 表达式
-    usprite $icon_star with fade($base_delay * 0.5)
-
-    -- ==================================================================
-    -- §11 Wait — 暂停指定毫秒数
-    --      对应 Rust: SceneNode::Wait { duration_ms: Expr }
-    --      duration_ms 支持字面量 / 变量 / 算术表达式
-    -- ==================================================================
-
-    -- 11a) 整数字面量（毫秒）
+    se "se_bell_ring"
     wait 800
 
-    -- 11b) 浮点字面量（秒）
-    wait 1.5
+    narration "上课铃响了。"
+    narration "班主任走进教室，简单介绍了我这个「新同学」。"
+    narration "但我的目光始终追随着窗外那棵巨大的樱花树。"
 
-    -- 11c) 变量引用
-    wait $base_delay
+    emotion akane "wink"
+    akane "（小声）喂，" + $player_name + "，放学后一起去逛逛吧？"
+    akane "我带你熟悉一下小镇！"
 
-    -- 11d) 算术表达式
-    wait $base_delay * 3
-
-    -- ==================================================================
-    -- §12 HideChar — 从舞台上移除角色立绘
-    --      对应 Rust: SceneNode::HideChar { char_id: Expr, transition? }
-    --      char_id 支持变量
-    -- ==================================================================
-
-    -- 12a) 字面量
-    hide akane
-
-    -- 12b) 变量 char_id + 表达式 duration
-    hide $char_heroine with fade($base_delay)
-
-    -- 重新显示角色用于后续演示
-    show sayori at center with fade(0.5)
-    show akane at right with fade(0.5)
-
-    -- ==================================================================
-    -- §13 SetVariable — 设置变量值
-    --      对应 Rust: SceneNode::SetVariable { name, value: Expr }
-    --      value 支持全部 7 种 Expr 变体
-    --      （字面量/变量引用已在 §0 中充分展示，此处补充比较/逻辑运算结果赋值）
-    -- ==================================================================
-
-    -- 13a) 比较运算结果赋给布尔变量
-    $is_high_affection = $affection_sayori >= 5
-
-    -- 13b) 逻辑运算结果赋值
-    $both_friends = $affection_sayori >= 3 and $affection_akane >= 3
-
-    -- 13c) 字符串拼接赋值
-    $full_title = "序章 — " + $player_name + "的视角"
-
-    -- ==================================================================
-    -- §14 SetFlag — 设置旗标为 true
-    --      对应 Rust: SceneNode::SetFlag { name }
-    --      旗标以 % 为前缀，用于跨场景事件追踪
-    -- ==================================================================
-
-    set %met_akane
-    set %seen_sakura_tree
-    set %completed_prologue
-
-    -- ==================================================================
-    -- §15 UnsetFlag — 清除旗标（设为 false）
-    --      对应 Rust: SceneNode::UnsetFlag { name }
-    -- ==================================================================
-
-    unset %bad_end_warning
-    unset %temporary_debug_flag
-
-    -- ==================================================================
-    -- §16 ToggleFlag — 翻转旗标（true↔false）
-    --      对应 Rust: SceneNode::ToggleFlag { name }
-    -- ==================================================================
-
-    toggle %auto_mode
-    toggle %mute_voice
-
-    -- ==================================================================
-    -- §17 Effect — 触发屏幕视觉效果
-    --      对应 Rust: SceneNode::Effect { effect_type: String, params: Map<String, Expr> }
-    --      params 的 value 全部是 Expr，支持变量和表达式
-    -- ==================================================================
-
-    -- 17a) 屏幕震动 — duration 用变量
-    effect "shake" intensity: 0.8 duration: $base_delay
-
-    -- 17b) 屏幕闪白 — duration 用表达式
-    effect "flash" color: "#FFFFFF" duration: $base_delay * 0.6
-
-    -- 17c) 屏幕闪黑
-    effect "flash" color: "#000000" duration: 500
-
-    -- 17d) 淡入淡出（通常用于场景首尾）
-    effect "fade_in" duration: 1000
-    effect "fade_out" duration: 800
-
-    -- ==================================================================
-    -- §18 Label — 定义跳转目标标签（自身无副作用）
-    --      对应 Rust: SceneNode::Label { name }
-    -- ==================================================================
-
-    label "branch_demo"
-
-    -- ==================================================================
-    -- §19 Branch — 条件分支 (if / elif / else)
-    --      对应 Rust: SceneNode::Branch { condition: Expr, then_nodes, elif_branches?, else_nodes? }
-    --      condition 支持全部比较/逻辑运算符
-    -- ==================================================================
-
-    -- 19a) 简单 if（比较运算符 >=）
-    if $affection_sayori >= 3 {
-        emotion sayori "happy"
-        sayori "看来我们的羁绊已经很深了呢。"
+    -- 条件分支：根据小百合好感度展示不同反应
+    if $affection_sayori >= 4 {
+        emotion sayori "default"
+        sayori "小茜，现在在上课呢……"
+        sayori "不过，放学后我也想一起去。"
     }
 
-    -- 19b) if / elif / else 完整三分支（比较运算符全覆盖: >= > ==）
-    if $score >= 100 {
-        narration "🏆 完美通关！"
-        set %perfect_clear
-    } elif $score > 50 {
-        narration "👍 不错的成绩。"
-    } elif $score == 10 {
-        narration "📖 刚好起步。"
-    } else {
-        narration "💪 才刚刚开始呢。"
-    }
+    -- ================================================================
+    -- 时间流逝 → 放学
+    -- ================================================================
 
-    -- 19c) 变量 vs 变量 比较
-    if $affection_sayori > $affection_akane {
-        narration "小百合的好感度领先。"
-    }
+    wait 600
+    se "se_bell_ring"
+    wait 400
 
-    -- 19d) 不等于 / 小于
-    if $affection_akane != 0 {
-        akane "我的好感度不是零！"
-    }
+    narration "——放学铃声响起。"
+    narration "教室里顿时热闹了起来。"
 
-    -- 19e) 逻辑与 (and) / 逻辑或 (or)
-    if $affection_sayori >= 3 and $affection_akane >= 3 {
-        narration "两人都是无可替代的伙伴。"
-    }
+    -- ================================================================
+    -- 选择菜单 — 玩家的第一个选择
+    --   menu 显示选项，等待玩家点击
+    --   选项可附带条件（if 子句），不满足条件时灰色不可选
+    --   goto 跳转到其他 .aster 场景文件
+    -- ================================================================
 
-    if $score < 0 or $score > 100 {
-        $score = 0
-        narration "分数异常，已自动修正。"
-    }
-
-    -- 19f) 一元逻辑非 (not) — 旗标 / 布尔变量
-    if not %bad_end_warning {
-        narration "一切安好，没有坏结局警告。"
-    }
-
-    if not $is_game_over {
-        narration "游戏继续。"
-    }
-
-    -- 19g) 嵌套 if（条件分支内可包含任意 SceneNode）
-    if $affection_akane >= 2 {
-        emotion akane "happy"
-        akane "嘿嘿，谢谢！"
-
-        if %met_akane {
-            akane "而且我们已经是老朋友了！"
-        }
-    }
-
-    -- 19h) 旗标直接作为条件
-    if %seen_sakura_tree {
-        narration "樱花树的景象在脑海中浮现。"
-    }
-
-    -- ==================================================================
-    -- §20 Jump — 场景内无条件跳转到标签
-    --      对应 Rust: SceneNode::Jump { target: Expr }
-    --      target 支持字面量标签名 / 变量引用（computed jump）
-    --      仅在当前场景内跳转；跨场景用 Goto（§24）
-    -- ==================================================================
-
-    -- 20a) 字面量标签（跳过中间演示语句，直接到 menu 部分）
-    jump "menu_demo"
-
-    -- 被跳过的语句（永远不会执行，仅证明 Jump 有效）
-    narration "如果你看到这句话，说明 Jump 没有生效——请检查解析器。"
-
-    -- 20b) 变量 target（computed jump，类似函数指针）
-    --      取消注释可测试:
-    -- $jump_dest = "branch_demo"
-    -- jump $jump_dest
-
-    -- ==================================================================
-    -- §21 函数式调用 / Return — 子例程调用与返回
-    --      调用:   name() 或 name(arg1, arg2) — 压栈，跳转到子例程
-    --      Return: SceneNode::Return — 弹栈，回到调用点的下一条语句
-    --      适用于可复用演出片段（回忆闪回/转场动画/公共序列）
-    -- ==================================================================
-
-    label "before_subroutine"
-
-    narration "现在演示子例程调用——"
-
-    -- 21a) 函数式调用子例程
-    flashback_subroutine()
-
-    -- Return 后从这里继续
-    narration "——子例程返回，继续主流程。"
-
-    jump "menu_demo"
-
-    -- ── 子例程定义 ──────────────────────────────────────────────────
-    sub "flashback_subroutine" {
-
-      se "se_memory_chime"
-      bg "bg_sakura_road_evening" with dissolve(0.8)
-      music "bgm_memory" fade_in: 1.0
-
-      narration "【闪回】那是很多年前的约定——"
-
-      if %met_akane {
-          narration "小茜也在那里，笑得很灿烂。"
-      }
-
-      -- 还原场景
-      bg "bg_classroom_morning" with dissolve(0.8)
-      music "bgm_daily_life" fade_in: 1.0
-
-      -- 21b) Return：从子例程返回
-    }
-
-    -- ==================================================================
-    -- §22 Menu — 显示选择支，等待玩家选择
-    --      对应 Rust: SceneNode::Menu { prompt: Expr, choices: Vec<Choice> }
-    --      Choice { text: Expr, target: Expr, condition?: Expr }
-    --      prompt / text / target / condition 全部是 Expr，支持插值
-    -- ==================================================================
-
-    label "menu_demo"
-
-    -- 22a) 基础菜单 — prompt 用字符串拼接
-    menu "要去哪里，" + $player_name + "？" {
-        "樱花大道" {
+    menu "放学后，" + $player_name + "要去哪里？" {
+        "去樱花大道散步" {
             $route_sakura = true
+            set %chose_sakura
             goto "chapter1/sakura_road"
         }
-        "图书馆" {
+        "去图书室看书" {
             $route_library = true
+            set %chose_library
             goto "chapter1/library"
         }
     }
-
-    -- 22b) 条件菜单 — condition 用比较/逻辑/旗标
-    menu "条件选项演示——请选择：" {
-        "普通选项（始终可选）" {
-            jump "goto_demo"
-        }
-        "高好感度限定" if $affection_sayori >= 5 {
-            $unlocked_secret = true
-            narration "🔓 你触发了隐藏对话！"
-            jump "goto_demo"
-        }
-        "完美通关限定" if %perfect_clear {
-            narration "🏆 完美通关者专属路线！"
-            jump "goto_demo"
-        }
-        "双重条件（好感度 + 旗标）" if $affection_akane >= 4 and %met_akane {
-            narration "🌟 特殊路线解锁！"
-            jump "goto_demo"
-        }
-    }
-
-    -- ==================================================================
-    -- §23 StopMusic — 停止背景音乐
-    --      对应 Rust: SceneNode::StopMusic { fade_out?: Expr }
-    --      fade_out 支持字面量 / 变量 / 表达式
-    -- ==================================================================
-
-    label "goto_demo"
-
-    -- 23a) 字面量淡出时间
-    stop_music fade_out: 1.5
-
-    -- 23b) 无淡出（立即停止）
-    -- stop_music
-
-    wait 2.0
-
-    -- 恢复音乐
-    music "bgm_daily_life" fade_in: 1.0
-
-    -- ==================================================================
-    -- §24 Goto — 跨场景跳转
-    --      对应 Rust: SceneNode::Goto { scene_id: Expr, label?: Expr }
-    --      scene_id / label 均支持变量（动态场景跳转）
-    --      与 Jump 区别：Jump 场景内，Goto 跨场景
-    -- ==================================================================
-
-    narration "跨场景跳转（Goto）演示——"
-
-    -- 24a) 字面量 scene_id（从目标场景开头开始）
-    -- 实际项目中取消注释以启用：
-    -- goto "chapter1/sakura_road"
-
-    -- 24b) 字面量 scene_id + 指定起始标签
-    -- goto "chapter1/sakura_road" label: "main_flow"
-
-    -- 24c) 变量 scene_id + 变量 label（computed goto，§0 中已定义）
-    -- goto $next_scene label: $next_label
-
-    narration "Goto 会跳转到另一个 .aster 场景文件。"
-    narration "取消上面 goto 语句的注释即可测试跨场景跳转。"
-
-    -- ==================================================================
-    -- §25 演示完毕
-    --      SceneNode 25 变体全部覆盖 ✓
-    --      Expr 7 种变体 + 14 种运算符全部覆盖 ✓
-    --      场景执行完毕，自动返回标题画面
-    -- ==================================================================
-
-    narration "—— SceneNode 25 变体 + Expr 插值完整演示结束 ——"
-    narration "感谢使用 Asterism（群星）引擎！"
 }
